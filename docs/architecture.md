@@ -24,5 +24,5 @@ Qt WebEngine is cross-platform across Windows, macOS, and Linux. Current Qt API 
 - Qt owns the Chromium integration layer and release cadence; Aurora must monitor and update Qt promptly.
 - Qt WebEngine is not the same product/runtime as Google Chrome. Extension API coverage, service worker behavior, profile storage encryption, and Chromium command-line policy need independent validation.
 - Python is suitable for the alpha UI but not yet an established packaging or security boundary. A production build needs a pinned, reproducible native build and signed distribution pipeline.
-- No data encryption is currently implemented. Qt's persistent profile directories are ordinary on-disk Chromium data.
+- The key-vault code encrypts Aurora-owned records through an explicit API, but it is not connected to the browser window or bookmarks. Qt's persistent profile directories remain ordinary on-disk Chromium data.
 - A PyInstaller Windows folder build completed, but its frozen executable failed during `PySide6.QtCore` import on the available Python 3.15 installation. Source execution works; packaging is an open issue, not a verified deliverable.

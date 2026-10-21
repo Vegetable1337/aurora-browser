@@ -1,1 +1,3 @@
 PySide6==6.12.0
+argon2-cffi==25.1.0
+cryptography==50.0.2

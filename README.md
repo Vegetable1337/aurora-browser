@@ -29,7 +29,9 @@ Profile management, encryption, private browsing, tracker blocking, permissions 
 
 ## Architecture and limitations
 
-See [docs/architecture.md](docs/architecture.md) and [docs/threat-model.md](docs/threat-model.md). Qt WebEngine provides a maintained Chromium integration and, in current Qt releases, a Chrome extension manager API. That API's presence does not establish that Aurora has extension support; Aurora currently has no extension UI, permission review, or compatibility suite. Firefox WebExtensions compatibility is unimplemented. Chromium-managed profile data is presently plaintext at rest, including cookies and cache. No encryption or profile-isolation claim is made.
+See [docs/architecture.md](docs/architecture.md) and [docs/threat-model.md](docs/threat-model.md). Qt WebEngine provides a maintained Chromium integration and, in current Qt releases, a Chrome extension manager API. That API's presence does not establish that Aurora has extension support; Aurora currently has no extension UI, permission review, or compatibility suite. Firefox WebExtensions compatibility is unimplemented. Chromium-managed profile data is presently plaintext at rest, including cookies and cache. There is no whole-profile encryption or isolation claim.
+
+An initial per-profile key-vault and encrypted app-record store now exists in [app/crypto_profiles.py](app/crypto_profiles.py). It is not wired to the browser window and does not encrypt Qt WebEngine storage. Its coverage and limitations are recorded in [docs/profile-crypto.md](docs/profile-crypto.md).
 
 Qt WebEngine embeds a particular Chromium revision and does not automatically update in lockstep with Google Chrome. Release packaging must pin and verify Qt/Chromium versions, ship signed updates, and track Qt security releases before distribution.
 
