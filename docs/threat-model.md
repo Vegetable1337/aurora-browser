@@ -2,7 +2,7 @@
 
 ## Intended scope
 
-This alpha can render websites using Qt WebEngine/Chromium, open multiple tabs, search, navigate, and save user-approved downloads. It is useful for evaluating the window and engine integration only.
+This Windows alpha renders websites using Qt WebEngine/Chromium and supports tabs, navigation, search, bookmarks, recent visits, downloads, private windows, and password-protected profiles. It has basic website permission prompts, but it is not yet a privacy-hardened daily browser.
 
 ## Security properties inherited from the engine
 
@@ -11,12 +11,15 @@ Aurora does not add Chromium command-line switches that disable sandboxing, cert
 ## Data and threats
 
 - Persistent cookies, cache, local storage and other Chromium profile data are kept under `%LOCALAPPDATA%\Aurora\Default` without Aurora application-layer encryption.
-- Aurora supports password-protected profiles with separate Chromium data directories and an encrypted bookmark store. The `Default` profile remains unprotected.
+- Aurora supports password-protected profiles with separate Chromium data directories and an encrypted store for bookmarks and Aurora's own visit list. The `Default` profile remains unprotected.
 - In a protected profile, cookies, history, cache, local storage, saved website credentials, permissions and other Chromium-managed files are still plaintext at rest. Profile isolation separates directories; it does not encrypt them.
-- Protected-profile bookmark values are encrypted, and URLs are not used directly as SQLite record IDs. Profile display names and basic record metadata remain visible.
+- Protected-profile bookmark and Aurora visit-list values are encrypted, and URLs are not used directly as SQLite record IDs. Profile display names and basic record metadata remain visible.
 - Locking destroys Aurora's active tabs and Qt profile object, then clears its vault buffer. It cannot promise renderer exit, key erasure from RAM/swap, or encrypted Chromium files. Do not treat Aurora as a whole-profile encrypted product.
 - Downloads are written to a user-selected location and are outside the profile directory; Aurora does not encrypt them.
-- No tracker blocklist, third-party-cookie policy, secure DNS controls, per-site permission controls, or fingerprinting protections have been implemented.
+- Private windows use an off-the-record Qt WebEngine profile with memory-only HTTP cache, non-persistent cookies, and no Aurora visit-list writes. User-selected downloads remain on disk, and websites/network providers still observe connections.
+- Supported website permission requests are prompted in the UI and decisions are held in memory for the active profile session. No dedicated permission-management screen is implemented.
+- A small built-in host list blocks some known tracking domains through Qt WebEngine's request interceptor. It is not a full EasyList/EasyPrivacy filter engine, has no automatic updates, and can break features on affected sites. It can be disabled in the Privacy menu.
+- Session cookies are not forced onto disk for crash recovery. No third-party-cookie restriction, secure DNS controls, or fingerprinting protections have been implemented.
 - No telemetry or Aurora account service is implemented by the app. Web pages still make their own network requests.
 - No automatic updater or release signature verification is implemented.
 
@@ -26,4 +29,4 @@ Aurora does not promise anonymity, full profile encryption, secure erasure, exte
 
 ## Work required before sensitive use
 
-Implement and test profile-specific key generation and OS-protected key wrapping; audit all Chromium and auxiliary storage paths; isolate profile processes and extension state; add explicit privacy controls backed by browser APIs; verify sandbox and site isolation in packaged builds; establish signed, promptly updated releases; and complete threat-model review and security regression testing.
+Encrypt or remove Chromium-managed storage at rest; audit all profile and auxiliary storage paths; isolate profile processes and extension state; adopt and update a complete, tested filter-list engine and third-party-cookie controls; verify sandbox and site isolation in packaged builds; establish signed, promptly updated releases; and complete threat-model review and security regression testing.

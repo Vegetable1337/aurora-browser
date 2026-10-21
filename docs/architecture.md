@@ -4,7 +4,7 @@
 
 ## Context
 
-Aurora needs a real Chromium renderer, a portable native interface, and a plausible path to extension support. The development machine is Windows 10 x64 and initially had no CMake, Ninja, Rust, .NET SDK, Qt installation, or C++ compiler available. Python 3.15 was installed.
+Aurora needs a real Chromium renderer and a portable native interface. The development machine is Windows 10 x64. Python 3.15 was installed initially; packaging verification later used a separate Python 3.13 environment.
 
 ## Decision
 
@@ -25,4 +25,4 @@ Qt WebEngine is cross-platform across Windows, macOS, and Linux. Current Qt API 
 - Qt WebEngine is not the same product/runtime as Google Chrome. Extension API coverage, service worker behavior, profile storage encryption, and Chromium command-line policy need independent validation.
 - Python is suitable for the alpha UI but not yet an established packaging or security boundary. A production build needs a pinned, reproducible native build and signed distribution pipeline.
 - Password-protected profiles connect the key-vault to bookmark records and use separate Qt WebEngine profile directories. Qt's persistent profile directories remain ordinary on-disk Chromium data.
-- A PyInstaller Windows folder build completed, but its frozen executable failed during `PySide6.QtCore` import on the available Python 3.15 installation. Source execution works; packaging is an open issue, not a verified deliverable.
+- A Windows folder build succeeds with Python 3.13 and Nuitka 4.3.1. Its packaged smoke mode loads a local HTML page in Qt WebEngine and exits successfully. PyInstaller builds failed during `PySide6.QtCore` import, so the documented script uses Nuitka. The output is a portable folder, not a signed installer; updates are not implemented.

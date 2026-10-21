@@ -16,11 +16,11 @@ The vault API's `lock()` zeroes the module's mutable PMK buffer and blocks later
 
 - The `Default` profile and its bookmarks remain unprotected. Existing default-profile bookmarks are not migrated automatically.
 - Password-protected profiles isolate Chromium cookies, cache, history, local storage, and related engine files in separate directories, but those files remain plaintext at rest. This includes saved website credentials and permissions managed by Chromium.
-- Only bookmarks in a password-protected profile are encrypted through the vault. Profile display names, record categories, and random-looking HMAC identifiers remain visible as metadata.
+- Bookmarks and Aurora's own visit list in a password-protected profile are encrypted through the vault. Chromium's separate history data remains plaintext. Profile display names, record categories, and random-looking HMAC identifiers remain visible as metadata.
 - A profile lock closes its tabs and revokes this application's vault API access. It does not encrypt Chromium files on disk, guarantee renderer-process termination, or erase plaintext from RAM, swap, or system caches.
 - Export/import is available in the vault API only; the browser UI does not yet expose backup or restore.
 - macOS Keychain and Linux Secret Service integration are not implemented. On those platforms password and recovery wrappers can be used, but automatic OS credential unlock is unavailable.
-- No biometric flow, password change, secure erasure, background-profile process stop, or cross-device sync is implemented.
+- No biometric flow, secure erasure, background-profile process stop, or cross-device sync is implemented. Password changes are supported for an unlocked protected profile.
 
 Therefore this milestone is **not** complete per the brief's whole-profile encryption acceptance criterion, and Aurora profiles must not be described as fully encrypted. See [threat-model.md](threat-model.md).
 
