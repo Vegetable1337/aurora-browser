@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import hmac
 import json
 import os
 import re
@@ -171,9 +172,11 @@ class CreatedProfile:
 class ProfileVault:
     """A profile-specific PMK protected by password, recovery key and Windows DPAPI."""
 
-    def __init__(self, profile_dir: Path, profile_id: str, master_key: bytes):
+    def __init__(self, profile_dir: Path, profile_id: str, master_key: bytes,
+                 display_name: str = "Profile"):
         self.profile_dir = profile_dir
         self.profile_id = profile_id
+        self.display_name = display_name
         if len(master_key) != PMK_BYTES:
             raise ProfileError("Invalid profile master key")
         self._master_key: bytearray | None = bytearray(master_key)
@@ -183,9 +186,13 @@ class ProfileVault:
         return self._master_key is not None
 
     @classmethod
-    def create(cls, profiles_root: Path | str, password: str) -> CreatedProfile:
+    def create(cls, profiles_root: Path | str, password: str,
+               display_name: str = "Profile") -> CreatedProfile:
         if not isinstance(password, str) or len(password) < 12:
             raise ProfileUnlockError("Choose a profile password of at least 12 characters")
+        display_name = display_name.strip()
+        if not display_name or len(display_name) > 64:
+            raise ProfileError("Profile name must contain 1–64 characters")
         root = Path(profiles_root)
         root.mkdir(parents=True, exist_ok=True)
         profile_id = uuid.uuid4().hex
@@ -212,6 +219,7 @@ class ProfileVault:
         metadata: dict[str, Any] = {
             "version": 1,
             "profile_id": profile_id,
+            "display_name": display_name,
             "key_wraps": {"password": password_wrap, "recovery": recovery_wrap},
         }
         if os.name == "nt":
@@ -222,7 +230,26 @@ class ProfileVault:
         except Exception:
             shutil.rmtree(profile_dir, ignore_errors=True)
             raise
-        return CreatedProfile(cls(profile_dir, profile_id, pmk), recovery)
+        return CreatedProfile(cls(profile_dir, profile_id, pmk, display_name), recovery)
+
+    @classmethod
+    def discover(cls, profiles_root: Path | str) -> list[tuple[str, str, Path]]:
+        root = Path(profiles_root)
+        if not root.exists():
+            return []
+        found: list[tuple[str, str, Path]] = []
+        for candidate in root.iterdir():
+            if not candidate.is_dir():
+                continue
+            try:
+                metadata = cls._read_metadata(candidate)
+                name = metadata.get("display_name", "Profile")
+                if not isinstance(name, str) or not name or len(name) > 64:
+                    name = "Profile"
+                found.append((metadata["profile_id"], name, candidate))
+            except (OSError, ProfileError):
+                continue
+        return sorted(found, key=lambda item: item[1].casefold())
 
     @staticmethod
     def _read_metadata(profile_dir: Path) -> dict[str, Any]:
@@ -235,6 +262,9 @@ class ProfileVault:
                 raise ProfileError("Profile metadata does not match its directory")
             if not isinstance(metadata.get("key_wraps"), dict):
                 raise ProfileError("Profile key protection metadata is missing")
+            display_name = metadata.get("display_name", "Profile")
+            if not isinstance(display_name, str) or not display_name or len(display_name) > 64:
+                raise ProfileError("Invalid profile name metadata")
             return metadata
         except ProfileError:
             raise
@@ -257,7 +287,7 @@ class ProfileVault:
         directory = Path(profile_dir)
         metadata = cls._read_metadata(directory)
         pmk = cls._unlock_with_password_metadata(metadata, password)
-        return cls(directory, metadata["profile_id"], pmk)
+        return cls(directory, metadata["profile_id"], pmk, metadata.get("display_name", "Profile"))
 
     @classmethod
     def _unlock_with_password_metadata(cls, metadata: dict[str, Any], password: str) -> bytes:
@@ -285,7 +315,7 @@ class ProfileVault:
             salt = _unb64(envelope["salt"], SALT_BYTES)
             key = _derive_recovery_key(recovery_key, salt, metadata["profile_id"])
             pmk = _unwrap_aes(key, envelope, f"Aurora/{metadata['profile_id']}/pmk/v1".encode("ascii"))
-            return cls(directory, metadata["profile_id"], pmk)
+            return cls(directory, metadata["profile_id"], pmk, metadata.get("display_name", "Profile"))
         except InvalidTag as exc:
             raise ProfileUnlockError("Incorrect recovery key") from exc
         except (KeyError, TypeError, ValueError) as exc:
@@ -300,7 +330,7 @@ class ProfileVault:
         try:
             wrapped = _unb64(metadata["key_wraps"]["windows_dpapi"])
             pmk = _dpapi_unprotect(wrapped, metadata["profile_id"].encode("ascii"))
-            return cls(directory, metadata["profile_id"], pmk)
+            return cls(directory, metadata["profile_id"], pmk, metadata.get("display_name", "Profile"))
         except (InvalidTag, KeyError, TypeError, ValueError, OSError) as exc:
             raise ProfileUnlockError("Windows could not unlock this profile") from exc
 
@@ -309,6 +339,23 @@ class ProfileVault:
             for index in range(len(self._master_key)):
                 self._master_key[index] = 0
             self._master_key = None
+
+    def change_password(self, password: str) -> None:
+        self._require_key()
+        if not isinstance(password, str) or len(password) < 12:
+            raise ProfileUnlockError("Choose a profile password of at least 12 characters")
+        metadata = self._read_metadata(self.profile_dir)
+        salt = secrets.token_bytes(SALT_BYTES)
+        password_key = _derive_password_key(password, salt)
+        wrap = _wrap_aes(password_key, self._require_key(),
+                         f"Aurora/{self.profile_id}/pmk/v1".encode("ascii"))
+        wrap.update({
+            "salt": _b64(salt), "kdf": "argon2id",
+            "memory_kib": ARGON_MEMORY_KIB, "iterations": ARGON_ITERATIONS,
+            "parallelism": ARGON_PARALLELISM,
+        })
+        metadata["key_wraps"]["password"] = wrap
+        self._write_metadata(self.profile_dir, metadata)
 
     def _require_key(self) -> bytes:
         if self._master_key is None:
@@ -322,6 +369,17 @@ class ProfileVault:
             algorithm=hashes.SHA256(), length=32, salt=None,
             info=f"Aurora/{self.profile_id}/records/{domain}/v1".encode("ascii"),
         ).derive(self._require_key())
+
+    def opaque_record_id(self, domain: str, identity: str) -> str:
+        if not isinstance(identity, str):
+            raise TypeError("Record identity must be text")
+        if not _DOMAIN_RE.fullmatch(domain):
+            raise ValueError("Invalid record domain")
+        index_key = HKDF(
+            algorithm=hashes.SHA256(), length=32, salt=None,
+            info=f"Aurora/{self.profile_id}/record-index/{domain}/v1".encode("ascii"),
+        ).derive(self._require_key())
+        return hmac.new(index_key, identity.encode("utf-8"), "sha256").hexdigest()
 
     def _connect_store(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.profile_dir / "records.sqlite3", timeout=10, isolation_level="IMMEDIATE")
@@ -366,9 +424,28 @@ class ProfileVault:
                              (domain, record_id)).fetchone()
         if row is None:
             return None
+        return self._decrypt_record(domain, record_id, row[0], row[1], key)
+
+    def list_records(self, domain: str) -> list[tuple[str, bytes]]:
+        self._require_key()
+        key = self._record_key(domain)
+        with closing(self._connect_store()) as db, db:
+            rows = db.execute("SELECT record_id,nonce,ciphertext FROM encrypted_records WHERE domain=? ORDER BY record_id",
+                              (domain,)).fetchall()
+        return [(record_id, self._decrypt_record(domain, record_id, nonce, ciphertext, key))
+                for record_id, nonce, ciphertext in rows]
+
+    def delete_record(self, domain: str, record_id: str) -> None:
+        self._require_key()
+        self._record_key(domain)
+        with closing(self._connect_store()) as db, db:
+            db.execute("DELETE FROM encrypted_records WHERE domain=? AND record_id=?", (domain, record_id))
+
+    def _decrypt_record(self, domain: str, record_id: str, nonce: bytes,
+                        ciphertext: bytes, key: bytes) -> bytes:
         aad = f"Aurora/{self.profile_id}/{domain}/{record_id}/v1".encode("utf-8")
         try:
-            return AESGCM(key).decrypt(row[0], row[1], aad)
+            return AESGCM(key).decrypt(nonce, ciphertext, aad)
         except InvalidTag as exc:
             raise ProfileError("Encrypted profile record failed authentication") from exc
 
@@ -442,7 +519,10 @@ class ProfileVault:
                 profile_id = uuid.UUID(hex=metadata["profile_id"]).hex
             except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
                 raise InvalidBackupError("Backup profile metadata is invalid") from exc
-            if metadata.get("version") != 1 or not isinstance(metadata.get("key_wraps"), dict):
+            if (metadata.get("version") != 1 or not isinstance(metadata.get("key_wraps"), dict)
+                    or not isinstance(metadata.get("display_name", "Profile"), str)
+                    or not metadata.get("display_name", "Profile")
+                    or len(metadata.get("display_name", "Profile")) > 64):
                 raise InvalidBackupError("Backup profile metadata is invalid")
             destination = root / profile_id
             if destination.exists():
@@ -475,7 +555,7 @@ class ProfileVault:
                     db.execute("UPDATE store_meta SET value=0 WHERE key='next_nonce_counter'")
             # Credential verification is done before the imported files become visible.
             verified_key = cls._unlock_with_password_metadata(metadata, profile_password)
-            restored = cls(staging, profile_id, verified_key)
+            restored = cls(staging, profile_id, verified_key, metadata.get("display_name", "Profile"))
             if os.name == "nt":
                 metadata["key_wraps"]["windows_dpapi"] = _b64(
                     _dpapi_protect(verified_key, metadata["profile_id"].encode("ascii")))
@@ -492,5 +572,11 @@ class ProfileVault:
 
     def delete_profile(self) -> None:
         self.lock()
-        shutil.rmtree(self.profile_dir)
+        self.delete_profile_directory(self.profile_dir)
+
+    @classmethod
+    def delete_profile_directory(cls, profile_dir: Path | str) -> None:
+        directory = Path(profile_dir)
+        cls._read_metadata(directory)
+        shutil.rmtree(directory)
 

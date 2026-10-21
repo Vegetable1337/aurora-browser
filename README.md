@@ -16,12 +16,15 @@ Aurora is an early Windows desktop browser alpha built with Qt for Python and Qt
 
 The Qt WebEngine runtime is large. On first launch, Chromium stores the default profile under `%LOCALAPPDATA%\Aurora\Default`. Downloads are saved only after the user chooses a destination.
 
+Use **Profiles → Create password-protected profile** to create an isolated profile. Aurora asks for a password of at least 12 characters and displays a one-time recovery key. Save that key before closing the dialog. The protected profile keeps bookmarks encrypted and stores its Chromium data in its own folder; cookies, history, cache and saved website credentials in that folder are still plaintext. **Profiles → Lock** closes its tabs and returns to the unprotected Default profile.
+
 ## Current functionality
 
 - Chromium-based website rendering through Qt WebEngine.
 - Multiple tabs, address/search bar, back/forward/reload, and keyboard shortcuts.
 - Persistent default browser profile and cookies.
 - SQLite bookmark save/list/open, stored alongside the default profile.
+- Separate password-protected browser profiles with encrypted bookmarks and password/recovery unlock.
 - Explicit save dialog for downloads.
 - Original dark glass-inspired navigation chrome.
 
@@ -31,7 +34,7 @@ Profile management, encryption, private browsing, tracker blocking, permissions 
 
 See [docs/architecture.md](docs/architecture.md) and [docs/threat-model.md](docs/threat-model.md). Qt WebEngine provides a maintained Chromium integration and, in current Qt releases, a Chrome extension manager API. That API's presence does not establish that Aurora has extension support; Aurora currently has no extension UI, permission review, or compatibility suite. Firefox WebExtensions compatibility is unimplemented. Chromium-managed profile data is presently plaintext at rest, including cookies and cache. There is no whole-profile encryption or isolation claim.
 
-An initial per-profile key-vault and encrypted app-record store now exists in [app/crypto_profiles.py](app/crypto_profiles.py). It is not wired to the browser window and does not encrypt Qt WebEngine storage. Its coverage and limitations are recorded in [docs/profile-crypto.md](docs/profile-crypto.md).
+Password-protected profiles use the key-vault in [app/crypto_profiles.py](app/crypto_profiles.py) for encrypted bookmarks. Their Chromium cookies, history, cache, saved website credentials and other engine files remain plaintext at rest. The unprotected `Default` profile also remains available. Coverage and limitations are recorded in [docs/profile-crypto.md](docs/profile-crypto.md).
 
 Qt WebEngine embeds a particular Chromium revision and does not automatically update in lockstep with Google Chrome. Release packaging must pin and verify Qt/Chromium versions, ship signed updates, and track Qt security releases before distribution.
 

@@ -8,13 +8,17 @@ The encrypted SQLite record store encrypts values with AES-256-GCM. A per-store 
 
 Encrypted exports use a separate backup password, Argon2id and AES-256-GCM around the archive. Restore checks authentication, archive members, profile metadata, SQLite integrity and the profile password before making the profile directory visible. Windows restore refreshes the DPAPI wrapper for the current user.
 
-The vault API's `lock()` zeroes the module's mutable PMK buffer and blocks later API access through that vault object. Python, the crypto library, the OS, and other copies may retain key material in memory; this is not secure erasure.
+The browser now has a Profiles menu to create, unlock, recover, switch, lock, change the password for, and delete password-protected profiles. Each protected profile gets its own Qt WebEngine profile directory. Protected-profile bookmarks use the encrypted record store; URL-derived record IDs use a profile-keyed HMAC so bookmark URLs are not exposed by SQLite row IDs. Profile display names remain plaintext in `profile.json` so Aurora can show them while locked.
+
+The vault API's `lock()` zeroes the module's mutable PMK buffer and blocks later API access through that vault object. When switching or locking, Aurora stops and destroys its tabs before disposing the Qt profile object and locking the vault. Python, the crypto library, Chromium, the OS, and other copies may retain key material in memory; this is not secure erasure.
 
 ## What is not implemented
 
-- The browser window does not create or unlock these vaults yet.
-- The current Qt WebEngine profile and `aurora.sqlite3` bookmarks database are still stored as ordinary Chromium/SQLite files. Cookies, cache, history, IndexedDB, service workers and other Chromium data are not encrypted by this vault.
-- Profile names and a profile manager UI are not implemented.
+- The `Default` profile and its bookmarks remain unprotected. Existing default-profile bookmarks are not migrated automatically.
+- Password-protected profiles isolate Chromium cookies, cache, history, local storage, and related engine files in separate directories, but those files remain plaintext at rest. This includes saved website credentials and permissions managed by Chromium.
+- Only bookmarks in a password-protected profile are encrypted through the vault. Profile display names, record categories, and random-looking HMAC identifiers remain visible as metadata.
+- A profile lock closes its tabs and revokes this application's vault API access. It does not encrypt Chromium files on disk, guarantee renderer-process termination, or erase plaintext from RAM, swap, or system caches.
+- Export/import is available in the vault API only; the browser UI does not yet expose backup or restore.
 - macOS Keychain and Linux Secret Service integration are not implemented. On those platforms password and recovery wrappers can be used, but automatic OS credential unlock is unavailable.
 - No biometric flow, password change, secure erasure, background-profile process stop, or cross-device sync is implemented.
 

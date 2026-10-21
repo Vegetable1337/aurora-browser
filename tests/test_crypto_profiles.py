@@ -35,6 +35,19 @@ class ProfileVaultTests(unittest.TestCase):
         self.assertNotEqual(self.profile._require_key(), other._require_key())
         other.lock()
 
+    def test_discovery_exposes_profile_names_without_unlocking_keys(self):
+        ProfileVault.create(self.root, PASSWORD_B, "Work").profile.lock()
+        names = [name for _profile_id, name, _path in ProfileVault.discover(self.root)]
+        self.assertIn("Work", names)
+
+    def test_opaque_record_ids_hide_plaintext_identity(self):
+        url = "https://example.invalid/private/path"
+        identifier = self.profile.opaque_record_id("bookmarks", url)
+        self.profile.put("bookmarks", identifier, url.encode())
+        raw_db = (self.profile.profile_dir / "records.sqlite3").read_bytes()
+        self.assertNotIn(url.encode(), raw_db)
+        self.assertEqual(self.profile.get("bookmarks", identifier), url.encode())
+
     def test_master_key_is_not_written_unwrapped_to_profile_files(self):
         master_key = self.profile._require_key()
         for path in self.profile.profile_dir.iterdir():
@@ -53,6 +66,19 @@ class ProfileVaultTests(unittest.TestCase):
         self.profile.lock()
         recovered = ProfileVault.unlock_recovery(self.profile.profile_dir, self.recovery_key)
         self.assertEqual(key_before, recovered._require_key())
+        recovered.lock()
+
+    def test_password_change_keeps_profile_key_and_recovery_wrapper(self):
+        key = self.profile._require_key()
+        self.profile.change_password("profile password delta")
+        self.profile.lock()
+        with self.assertRaises(ProfileUnlockError):
+            ProfileVault.unlock_password(self.profile.profile_dir, PASSWORD_A)
+        changed = ProfileVault.unlock_password(self.profile.profile_dir, "profile password delta")
+        self.assertEqual(key, changed._require_key())
+        changed.lock()
+        recovered = ProfileVault.unlock_recovery(self.profile.profile_dir, self.recovery_key)
+        self.assertEqual(key, recovered._require_key())
         recovered.lock()
 
     def test_other_profile_cannot_decrypt_ciphertext(self):
