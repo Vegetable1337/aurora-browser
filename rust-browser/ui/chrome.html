@@ -10,7 +10,8 @@
     .tabs{height:40px;display:flex;align-items:end;padding:5px 8px 0;background:var(--chrome);gap:4px;user-select:none}
     #tab-list{display:flex;align-items:end;gap:2px;flex:0 1 auto;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
     #tab-list::-webkit-scrollbar{display:none}
-    .tab{height:32px;width:230px;max-width:32vw;background:#ffffff09;border:1px solid #ffffff08;border-bottom:0;border-radius:14px 14px 0 0;display:flex;align-items:center;padding:0 11px;gap:9px;color:#abb4c7;cursor:pointer;transition:background .22s ease,border-color .22s ease,transform .24s cubic-bezier(.2,.8,.2,1),opacity .24s ease,filter .24s ease;animation:tab-appear .24s cubic-bezier(.2,.8,.2,1)}
+    .tab{height:32px;width:230px;max-width:32vw;background:#ffffff09;border:1px solid #ffffff08;border-bottom:0;border-radius:14px 14px 0 0;display:flex;align-items:center;padding:0 11px;gap:9px;color:#abb4c7;cursor:grab;touch-action:none;transition:background .18s ease,border-color .18s ease,transform .18s cubic-bezier(.2,.8,.2,1),opacity .18s ease,filter .18s ease;animation:tab-appear .18s cubic-bezier(.2,.8,.2,1)}
+    .tab:active{cursor:grabbing}.tab.dragging{opacity:.48;transform:scale(.96)}.tab.drop-target{box-shadow:inset 2px 0 var(--accent)}
     .tab:hover{background:#ffffff12;color:#f2f5fb}.tab.active{position:relative;z-index:1;background:var(--raised);border-color:var(--line);color:#f4f6fb;box-shadow:inset 0 1px #ffffff1a}
     .tab.closing{opacity:0;transform:translateY(5px) scale(.92);filter:blur(4px)}
     .favicon{width:17px;height:17px;border-radius:7px;background:linear-gradient(145deg,#dce7ff,#94a9d5);color:#1b2437;font-size:10px;font-weight:700;display:grid;place-items:center}
@@ -112,10 +113,28 @@
         if (!el) {
           el = document.createElement('div');
           el.dataset.tabId = tab.id;
+        el.draggable = true;
         el.className = 'tab' + (tab.id === active ? ' active' : '');
         el.onclick = () => { closeMenu(); send('select_tab', null, tab.id); };
         el.addEventListener('auxclick', e => {
           if (e.button === 1) { e.preventDefault(); e.stopPropagation(); closeTabAnimated(tab.id, el); }
+        });
+        el.addEventListener('dragstart', e => {
+          if (e.target.closest('button')) { e.preventDefault(); return; }
+          draggedTab = el; el.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(tab.id));
+        });
+        el.addEventListener('dragover', e => {
+          if (!draggedTab || draggedTab === el) return;
+          e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+          const rect = el.getBoundingClientRect();
+          const reference = e.clientX < rect.left + rect.width / 2 ? el : el.nextSibling;
+          if (draggedTab !== reference && draggedTab.nextSibling !== reference) moveTabSmoothly(root, draggedTab, reference);
+        });
+        el.addEventListener('dragend', () => {
+          if (!draggedTab) return;
+          draggedTab.classList.remove('dragging'); draggedTab = null;
+          send('reorder_tabs', JSON.stringify([...root.children].map(node => Number(node.dataset.tabId))));
         });
         const icon = document.createElement('span');
           icon.className = 'favicon'; icon.textContent = tab.private ? '◉' : 'A';
@@ -138,6 +157,22 @@
       });
       for (const stale of old.values()) stale.remove();
     };
+    function moveTabSmoothly(root, moving, reference) {
+      const before = new Map([...root.children].map(node => [node, node.getBoundingClientRect()]));
+      root.insertBefore(moving, reference);
+      if (document.documentElement.classList.contains('no-motion') || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      for (const node of root.children) {
+        if (node === moving) continue;
+        const from = before.get(node);
+        if (!from) continue;
+        const to = node.getBoundingClientRect();
+        const dx = from.left - to.left;
+        if (Math.abs(dx) < 1) continue;
+        node.getAnimations().forEach(animation => animation.cancel());
+        node.animate([{ transform: `translateX(${dx}px)` }, { transform: 'translateX(0)' }],
+          { duration: 190, easing: 'cubic-bezier(.2,.75,.25,1)' });
+      }
+    }
     window.setAddress = url => { if (document.activeElement !== address) address.value = url || ''; };
     window.showToast = text => {
       const toast = document.querySelector('#toast'); toast.textContent = text; toast.style.display = 'block';
@@ -149,9 +184,14 @@
     window.closeMenu = closeMenu;
     function closeTabAnimated(id, element) {
       if (document.documentElement.classList.contains('no-motion')) { send('close_tab', null, id); return; }
+      if (id === window.activeTab) {
+        const next = [...document.querySelectorAll('.tab')].find(tab => Number(tab.dataset.tabId) !== id);
+        if (next) send('select_tab', null, Number(next.dataset.tabId));
+      }
       element.classList.add('closing');
-      setTimeout(() => send('close_tab', null, id), 250);
+      setTimeout(() => send('close_tab', null, id), 180);
     }
+    let draggedTab = null;
     window.renderTabs([{id: 0, title: 'Новая вкладка'}], 0);
     address.addEventListener('keydown', e => {
       if (e.key === 'Enter') { send('navigate', address.value); address.blur(); }

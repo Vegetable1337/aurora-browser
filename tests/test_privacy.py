@@ -4,6 +4,7 @@ import unittest
 from types import SimpleNamespace
 
 from PySide6.QtCore import QUrl
+from PySide6.QtWebEngineCore import QWebEngineUrlRequestInfo
 
 from app.privacy import TrackerBlocker, is_tracker_host, is_tracker_request
 
@@ -26,6 +27,7 @@ class TrackerBlockerTests(unittest.TestCase):
         info = SimpleNamespace(
             requestUrl=lambda: QUrl("https://doubleclick.net/pixel"),
             firstPartyUrl=lambda: QUrl("https://shop.example/"),
+            resourceType=lambda: QWebEngineUrlRequestInfo.ResourceType.ResourceTypeImage,
             block=blocked.append,
         )
         blocker.interceptRequest(info)

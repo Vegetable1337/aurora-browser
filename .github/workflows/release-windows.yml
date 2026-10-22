@@ -1,0 +1,44 @@
+name: Aurora Windows alpha release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format and test
+        working-directory: rust-browser
+        run: |
+          cargo fmt --check
+          cargo test --locked
+      - name: Build optimized Windows binary
+        working-directory: rust-browser
+        run: cargo build --release --locked
+      - name: Package portable alpha
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item rust-browser/target/release/aurora-browser.exe release/Aurora.exe
+          @'
+          Aurora Browser Windows alpha
+
+          Requires the Microsoft Edge WebView2 Runtime and a supported Windows system.
+          This is an early alpha: extensions are not supported. Protected profiles do not
+          encrypt WebView2 browser data at rest. Do not use this build for sensitive data.
+          See README.md and docs/p0-audit.md for supported features and known limitations.
+          '@ | Set-Content release/README.txt
+          Compress-Archive -Path release/* -DestinationPath Aurora-Windows-x64.zip
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "${{ github.ref_name }}" Aurora-Windows-x64.zip `
+            --title "Aurora Browser ${{ github.ref_name }}" `
+            --prerelease --verify-tag --notes-file docs/p0-audit.md

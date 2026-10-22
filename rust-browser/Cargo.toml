@@ -1,6 +1,6 @@
 [package]
 name = "aurora-browser"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 edition = "2024"
 description = "Aurora desktop browser, Rust and WebView2 prototype"
 license = "MIT"
@@ -26,6 +26,7 @@ zeroize = "1"
 winit = "0.30"
 wry = "0.57"
 image = { version = "0.25", default-features = false, features = ["png"] }
+percent-encoding = "2"
 
 [build-dependencies]
 winres = "0.1"

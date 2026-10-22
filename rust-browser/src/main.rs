@@ -201,6 +201,27 @@ impl AuroraApp {
         self.refresh_chrome();
     }
 
+    fn reorder_tabs(&mut self, encoded_ids: &str) {
+        let Ok(ids) = serde_json::from_str::<Vec<u64>>(encoded_ids) else {
+            return;
+        };
+        if ids.len() != self.tabs.len() {
+            return;
+        }
+        let mut reordered = Vec::with_capacity(self.tabs.len());
+        for id in ids {
+            let Some(index) = self.tabs.iter().position(|tab| tab.id == id) else {
+                return;
+            };
+            if reordered.iter().any(|tab: &BrowserTab| tab.id == id) {
+                return;
+            }
+            reordered.push(self.tabs.remove(index));
+        }
+        self.tabs = reordered;
+        self.refresh_chrome();
+    }
+
     fn close_tab(&mut self, event_loop: &ActiveEventLoop, id: u64) {
         let Some(index) = self.tabs.iter().position(|tab| tab.id == id) else {
             return;
@@ -329,6 +350,8 @@ impl AuroraApp {
             let ready_proxy = proxy.clone();
             let overlay = WebViewBuilder::new_with_web_context(context)
                 .with_html(OVERLAY_HTML)
+                .with_navigation_handler(|url| is_trusted_ui_navigation(&url, OVERLAY_HTML))
+                .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
                 .with_transparent(true)
                 .with_visible(false)
                 .with_bounds(Rect {
@@ -490,6 +513,8 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
 
         let chrome = WebViewBuilder::new()
             .with_html(CHROME_HTML)
+            .with_navigation_handler(|url| is_trusted_ui_navigation(&url, CHROME_HTML))
+            .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
             .with_focused(true)
             .with_bounds(Rect {
                 position: LogicalPosition::new(0, 0).into(),
@@ -873,6 +898,11 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                         self.select_tab(id);
                     }
                 }
+                "reorder_tabs" => {
+                    if let Some(ids) = command.value.as_deref() {
+                        self.reorder_tabs(ids);
+                    }
+                }
                 "close_tab" => {
                     if let Some(id) = command.tab_id.or(self.active_tab) {
                         self.close_tab(event_loop, id);
@@ -1108,6 +1138,70 @@ const CHROME_HTML: &str = include_str!("../ui/chrome.html");
 const NEW_TAB_HTML: &str = include_str!("../ui/new_tab.html");
 const AURORA_LOGO_SVG: &str = include_str!("../assets/aurora.svg");
 const OVERLAY_HTML: &str = include_str!("../ui/overlay.html");
+
+// NavigateToString can surface as a data URL in NavigationStarting. Only the
+// exact compiled-in document may occupy a view with Aurora IPC privileges.
+fn is_trusted_ui_navigation(url: &str, html: &str) -> bool {
+    use base64::Engine;
+    // Bound work before decoding an attacker-controlled URL.
+    if url.len() > html.len().saturating_mul(4).saturating_add(256) {
+        return false;
+    }
+    let Some((header, payload)) = url.split_once(',') else {
+        return false;
+    };
+    let mut parts = header.split(';');
+    if parts.next() != Some("data:text/html") {
+        return false;
+    }
+    let mut encoded = false;
+    for part in parts {
+        match part {
+            "base64" if !encoded => encoded = true,
+            "charset=utf-8" | "charset=UTF-8" => {}
+            _ => return false,
+        }
+    }
+    let bytes = percent_encoding::percent_decode_str(payload).collect::<Vec<_>>();
+    if encoded {
+        base64::engine::general_purpose::STANDARD
+            .decode(bytes)
+            .is_ok_and(|decoded| decoded == html.as_bytes())
+    } else {
+        bytes == html.as_bytes()
+    }
+}
+
+#[cfg(test)]
+mod ui_navigation_tests {
+    use super::*;
+    use base64::Engine;
+    #[test]
+    fn embedded_documents_load_and_foreign_documents_are_rejected() {
+        for html in [CHROME_HTML, OVERLAY_HTML] {
+            let encoded =
+                percent_encoding::utf8_percent_encode(html, percent_encoding::NON_ALPHANUMERIC);
+            assert!(is_trusted_ui_navigation(
+                &format!("data:text/html;charset=utf-8,{encoded}"),
+                html
+            ));
+            let encoded = base64::engine::general_purpose::STANDARD.encode(html);
+            assert!(is_trusted_ui_navigation(
+                &format!("data:text/html;base64,{encoded}"),
+                html
+            ));
+            for foreign in [
+                "https://example.com",
+                "about:blank",
+                "javascript:alert(1)",
+                "data:text/html,<script>alert(1)</script>",
+                "data:text/html;base64,!!!!",
+            ] {
+                assert!(!is_trusted_ui_navigation(foreign, html));
+            }
+        }
+    }
+}
 
 fn new_tab_html(settings: &BrowserSettings) -> String {
     let action = if settings.search_engine == "google" {

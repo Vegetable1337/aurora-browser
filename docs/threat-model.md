@@ -1,5 +1,9 @@
 # Initial threat model and known gaps
 
+> This document describes the legacy Python/Qt implementation. Current Rust
+> boundaries and unverified security properties are recorded in
+> [the P0 audit](p0-audit.md). Python protections must not be assumed to exist in Rust.
+
 ## Intended scope
 
 This Windows alpha renders websites using Qt WebEngine/Chromium and supports tabs, navigation, search, bookmarks, recent visits, downloads, private windows, and password-protected profiles. It has basic website permission prompts, but it is not yet a privacy-hardened daily browser.

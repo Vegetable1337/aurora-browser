@@ -1,5 +1,9 @@
 # Aurora Rust prototype
 
+Current security review and outstanding requirements: [P0 audit](../docs/p0-audit.md).
+Protected profiles do not yet encrypt WebView2 data on disk. Extension compatibility
+is under investigation and is not currently a supported feature.
+
 This folder contains Aurora's primary Rust application. It builds the browser window and Chromium-based page using Rust, Wry and the installed Microsoft Edge WebView2 Runtime. The former Python/Qt app remains in the repository as a migration reference.
 
 ## Windows build prerequisites
@@ -13,6 +17,10 @@ Build and launch from this folder:
 ```powershell
 cargo run
 ```
+
+The Windows alpha release is built by GitHub Actions from version tags. It
+requires the Microsoft Edge WebView2 Runtime. Releases are marked prerelease
+because extension support and whole-profile encryption are not implemented.
 
 The page profile and `bookmarks.json`, `history.json` and `settings.json` are stored under `%LOCALAPPDATA%\Aurora\Rust\Default`. The current Rust milestone has tabs, address/search navigation, back/forward/reload, find-in-page (`Ctrl+F`, Enter and `Ctrl+G`), bookmarks, visit history, history clearing, basic downloads to the Windows Downloads folder, and custom window controls. Tabs show a loading indicator and can scroll horizontally when the strip fills; middle-click closes a tab. New tabs use a configurable Aurora or DuckDuckGo start page, and a separate animated overlay provides the library and settings. Settings include the search provider, light/dark appearance, and motion effects. A private tab can be opened from the library menu; it uses WebView2's incognito mode and its page visits are excluded from Aurora history.
 

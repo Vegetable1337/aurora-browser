@@ -1,5 +1,9 @@
 # Architecture decision record: initial browser engine
 
+> Historical Python/Qt architecture. Aurora's primary application now uses
+> Rust/Wry/WebView2 on Windows. See [the current P0 audit](p0-audit.md) for the
+> current implementation, security gaps and extension investigation.
+
 **Status:** Accepted for the initial Windows alpha; reassess before production hardening.
 
 ## Context

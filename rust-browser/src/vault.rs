@@ -20,7 +20,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use thiserror::Error;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 const KEY_BYTES: usize = 32;
 const SALT_BYTES: usize = 16;
@@ -267,7 +267,7 @@ impl ProfileVault {
         }
         let mut salt = [0u8; SALT_BYTES];
         OsRng.fill_bytes(&mut salt);
-        let mut key = password_key(backup_password, &salt)?;
+        let mut key = Zeroizing::new(password_key(backup_password, &salt)?);
         let (nonce, encrypted) = seal(&key, &payload, BACKUP_AAD)?;
         key.zeroize();
         let nonce = STANDARD.decode(nonce).map_err(|_| VaultError::Crypto)?;
@@ -459,9 +459,10 @@ impl ProfileVault {
     }
 
     pub fn lock(&mut self) {
-        if let Some(mut key) = self.master_key.take() {
+        if let Some(key) = self.master_key.as_mut() {
             key.zeroize();
         }
+        self.master_key = None;
     }
 
     pub fn opaque_record_id(&self, domain: &str, identity: &str) -> Result<String, VaultError> {
@@ -479,7 +480,7 @@ impl ProfileVault {
         if record_id.len() > 1024 {
             return Err(VaultError::InvalidData);
         }
-        let key = self.record_key(domain)?;
+        let key = Zeroizing::new(self.record_key(domain)?);
         let aad = format!("Aurora/{}/{domain}/{record_id}/v1", self.profile_id);
         let mut connection = self.connect_store()?;
         let transaction = connection.transaction()?;
@@ -491,7 +492,7 @@ impl ProfileVault {
         }
         let mut nonce = prefix;
         nonce.extend_from_slice(&(counter as u32).to_be_bytes());
-        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key.as_slice()));
         let ciphertext = cipher
             .encrypt(
                 Nonce::from_slice(&nonce),
@@ -518,7 +519,7 @@ impl ProfileVault {
         records: &[(String, Vec<u8>)],
     ) -> Result<(), VaultError> {
         validate_domain(domain)?;
-        let key = self.record_key(domain)?;
+        let key = Zeroizing::new(self.record_key(domain)?);
         let mut connection = self.connect_store()?;
         let transaction = connection.transaction()?;
         let (prefix, mut counter): (Vec<u8>, i64) = transaction.query_row(
@@ -531,7 +532,7 @@ impl ProfileVault {
             return Err(VaultError::InvalidData);
         }
         transaction.execute("DELETE FROM encrypted_records WHERE domain=?", [domain])?;
-        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key.as_slice()));
         for (record_id, plaintext) in records {
             if record_id.len() > 1024 {
                 return Err(VaultError::InvalidData);
@@ -564,7 +565,7 @@ impl ProfileVault {
 
     pub fn get(&self, domain: &str, record_id: &str) -> Result<Option<Vec<u8>>, VaultError> {
         validate_domain(domain)?;
-        let key = self.record_key(domain)?;
+        let key = Zeroizing::new(self.record_key(domain)?);
         let connection = self.connect_store()?;
         let row: Option<(Vec<u8>, Vec<u8>)> = connection
             .query_row(
@@ -586,7 +587,7 @@ impl ProfileVault {
 
     pub fn list(&self, domain: &str) -> Result<Vec<(String, Vec<u8>)>, VaultError> {
         validate_domain(domain)?;
-        let key = self.record_key(domain)?;
+        let key = Zeroizing::new(self.record_key(domain)?);
         let connection = self.connect_store()?;
         let mut statement = connection.prepare("SELECT record_id,nonce,ciphertext FROM encrypted_records WHERE domain=? ORDER BY record_id")?;
         let rows = statement.query_map([domain], |row| {
@@ -620,20 +621,24 @@ impl ProfileVault {
         Ok(())
     }
 
-    fn key(&self) -> Result<[u8; KEY_BYTES], VaultError> {
-        self.master_key.ok_or(VaultError::Unlock)
+    fn key(&self) -> Result<&[u8; KEY_BYTES], VaultError> {
+        self.master_key.as_ref().ok_or(VaultError::Unlock)
     }
     fn record_key(&self, domain: &str) -> Result<[u8; KEY_BYTES], VaultError> {
         validate_domain(domain)?;
         derive_hkdf(
-            &self.key()?,
+            self.key()?,
             &[],
             format!("Aurora/{}/records/{domain}/v1", self.profile_id).as_bytes(),
         )
     }
     fn connect_store(&self) -> Result<Connection, VaultError> {
-        let connection = Connection::open(self.directory.join("records.sqlite3"))?;
-        init_store(&connection)?;
+        // Never recreate nonce state in an existing vault: resetting its counter
+        // could reuse an AES-GCM nonce under the same profile key.
+        let connection = Connection::open_with_flags(
+            self.directory.join("records.sqlite3"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
+        )?;
         Ok(connection)
     }
 }
@@ -641,6 +646,143 @@ impl ProfileVault {
 impl Drop for ProfileVault {
     fn drop(&mut self) {
         self.lock();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            Self(std::env::temp_dir().join(format!("aurora-test-{}", uuid::Uuid::new_v4())))
+        }
+        fn create(&self) -> CreatedVault {
+            ProfileVault::create(&self.0, "Test", "test password alpha").unwrap()
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    #[test]
+    fn missing_nonce_state_fails_closed() {
+        let root = Fixture::new();
+        let created = root.create();
+        let vault = created.vault;
+        vault.put("settings", "secret", b"private value").unwrap();
+        vault.delete("settings", "secret").unwrap();
+        let db = Connection::open(vault.directory().join("records.sqlite3")).unwrap();
+        db.execute("DELETE FROM store_meta WHERE key='next_nonce_counter'", [])
+            .unwrap();
+        assert!(vault.put("settings", "secret", b"changed value").is_err());
+    }
+    #[test]
+    fn independent_keys_lock_and_authenticated_records() {
+        let root = Fixture::new();
+        let mut first = root.create().vault;
+        let second = root.create().vault;
+        assert_ne!(first.key().unwrap(), second.key().unwrap());
+        first.put("settings", "secret", b"private value").unwrap();
+        assert_eq!(
+            first.get("settings", "secret").unwrap().unwrap(),
+            b"private value"
+        );
+        assert!(second.get("settings", "secret").unwrap().is_none());
+        let db = Connection::open(first.directory().join("records.sqlite3")).unwrap();
+        let (nonce, ciphertext): (Vec<u8>, Vec<u8>) = db
+            .query_row(
+                "SELECT nonce,ciphertext FROM encrypted_records WHERE record_id='secret'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let other_db = Connection::open(second.directory().join("records.sqlite3")).unwrap();
+        other_db
+            .execute(
+                "INSERT INTO encrypted_records VALUES('settings','secret',?,?)",
+                params![nonce, ciphertext],
+            )
+            .unwrap();
+        assert!(second.get("settings", "secret").is_err());
+        db.execute("UPDATE encrypted_records SET ciphertext=zeroblob(32)", [])
+            .unwrap();
+        assert!(first.get("settings", "secret").is_err());
+        first.lock();
+        assert!(first.put("settings", "secret", b"x").is_err());
+        assert!(first.get("settings", "secret").is_err());
+        second.put("settings", "still-open", b"yes").unwrap();
+    }
+    #[test]
+    fn nonce_progress_survives_reopen_and_deleted_database_is_not_recreated() {
+        let root = Fixture::new();
+        let mut vault = root.create().vault;
+        vault.put("settings", "one", b"first").unwrap();
+        let directory = vault.directory().to_owned();
+        let path = directory.join("records.sqlite3");
+        let nonce_before: Vec<u8> = Connection::open(&path)
+            .unwrap()
+            .query_row("SELECT nonce FROM encrypted_records", [], |row| row.get(0))
+            .unwrap();
+        vault.lock();
+        let reopened = ProfileVault::unlock_password(&directory, "test password alpha").unwrap();
+        reopened.put("settings", "one", b"second").unwrap();
+        let nonce_after: Vec<u8> = Connection::open(&path)
+            .unwrap()
+            .query_row("SELECT nonce FROM encrypted_records", [], |row| row.get(0))
+            .unwrap();
+        assert_ne!(nonce_before, nonce_after);
+        fs::remove_file(&path).unwrap();
+        assert!(reopened.put("settings", "one", b"third").is_err());
+        assert!(!path.exists());
+    }
+    #[test]
+    fn recovery_and_backup_round_trip() {
+        let root = Fixture::new();
+        let created = root.create();
+        let mut vault = created.vault;
+        vault
+            .put("bookmarks", "one", b"https://example.invalid")
+            .unwrap();
+        let directory = vault.directory().to_owned();
+        let backup = root.0.join("backup.aurorabk");
+        vault
+            .export_backup(&backup, "backup password alpha")
+            .unwrap();
+        vault.lock();
+        assert!(ProfileVault::unlock_password(&directory, "wrong password").is_err());
+        let recovered = ProfileVault::unlock_recovery(&directory, &created.recovery_key).unwrap();
+        assert_eq!(
+            recovered.get("bookmarks", "one").unwrap().unwrap(),
+            b"https://example.invalid"
+        );
+        let destination = root.0.join("restored");
+        let restored = ProfileVault::restore_backup(
+            &backup,
+            &destination,
+            "backup password alpha",
+            "test password alpha",
+        )
+        .unwrap();
+        assert_eq!(
+            restored.get("bookmarks", "one").unwrap().unwrap(),
+            b"https://example.invalid"
+        );
+        restored.put("bookmarks", "two", b"new record").unwrap();
+        let mut bytes = fs::read(&backup).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 1;
+        fs::write(&backup, bytes).unwrap();
+        assert!(
+            ProfileVault::restore_backup(
+                &backup,
+                &root.0.join("tampered"),
+                "backup password alpha",
+                "test password alpha"
+            )
+            .is_err()
+        );
     }
 }
 
@@ -726,7 +868,7 @@ fn wrap_password(
 ) -> Result<Envelope, VaultError> {
     let mut salt = [0u8; SALT_BYTES];
     OsRng.fill_bytes(&mut salt);
-    let mut key = password_key(password, &salt)?;
+    let mut key = Zeroizing::new(password_key(password, &salt)?);
     let (nonce, ciphertext) = seal(&key, master, aad)?;
     key.zeroize();
     Ok(Envelope {
