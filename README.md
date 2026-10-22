@@ -12,7 +12,7 @@
   <a href="#简体中文">简体中文</a>
 </p>
 
-Aurora is an early-stage browser project. It currently contains a more feature-complete Python/Qt WebEngine application and a newer Rust/Wry browser prototype backed by Microsoft Edge WebView2. The Rust app uses the Chromium-based WebView2 engine installed on Windows; it does not build or bundle the Chromium source tree.
+Aurora is an early-stage browser project. The primary desktop application is Rust/Wry backed by Microsoft Edge WebView2; the former Python/Qt WebEngine application is retained as a migration reference. The Rust app uses the Chromium-based WebView2 engine installed on Windows; it does not build or bundle the Chromium source tree.
 
 > **Status:** Experimental alpha. Aurora has not undergone a security audit and is not a hardened privacy browser. Do not rely on it for sensitive browsing.
 
@@ -20,7 +20,7 @@ Aurora is an early-stage browser project. It currently contains a more feature-c
 
 ## Русский
 
-Aurora — экспериментальный настольный браузер для Windows с упором на приватность и прозрачное описание ограничений. В репозитории находятся две версии: более функциональный прототип на Python и Qt WebEngine и новая версия на Rust и Wry с движком Microsoft Edge WebView2.
+Aurora — экспериментальный настольный браузер для Windows с упором на приватность и прозрачное описание ограничений. Основное приложение написано на Rust и Wry с движком Microsoft Edge WebView2; прежняя версия на Python и Qt WebEngine оставлена как справочная на время переноса функций.
 
 ### Возможности
 
@@ -38,11 +38,13 @@ Aurora — экспериментальный настольный браузе�
 
 - Окно браузера на Rust, Wry и установленном WebView2 Runtime.
 - Вкладки, адресная строка, поиск, переходы назад и вперёд, обновление и закладки.
+- Поиск по странице, приватная вкладка на режиме инкогнито WebView2 и локальное сохранение настроек/истории без записи приватных посещений.
+- Защищённые профили Rust с паролем или ключом восстановления, экспортом/восстановлением резервных копий и зашифрованными закладками/журналом Aurora в SQLite.
 - Список посещений, очистка журнала, загрузки в папку Downloads.
 - Страница новой вкладки Aurora, меню библиотеки и настройки темы, поисковика, стартовой страницы и анимаций.
 - Логотип Aurora и Windows-иконка приложения.
 
-Rust-версия пока не поддерживает все функции Python-прототипа: в частности, приватные окна, управление разрешениями, блокировку трекеров, защищённые профили и диалог выбора места загрузки. Хранение данных WebView2 не зашифровано.
+Rust-версия пока не поддерживает все функции прежнего Python-прототипа: в частности, отдельные приватные окна, управление разрешениями сайтов и блокировку трекеров. Шифрование защищённых профилей покрывает данные Aurora, но не файлы WebView2 (cookies, кэш и другие данные Chromium).
 
 ### Запуск Python-версии
 
@@ -103,7 +105,7 @@ Qt WebEngine и WebView2 поставляются и обновляются от
 
 ## English
 
-Aurora is an experimental Windows desktop browser project focused on privacy and clear documentation of its limitations. The repository contains two implementations: a more feature-complete Python/Qt WebEngine prototype and a newer Rust/Wry application using Microsoft Edge WebView2.
+Aurora is an experimental Windows desktop browser project focused on privacy and clear documentation of its limitations. Its primary application is written in Rust and Wry with Microsoft Edge WebView2; the former Python/Qt WebEngine application remains as a migration reference.
 
 ### Features
 
@@ -121,11 +123,12 @@ Aurora is an experimental Windows desktop browser project focused on privacy and
 
 - A Rust and Wry desktop shell using the installed WebView2 Runtime.
 - Tabs, address/search bar, back/forward navigation, reload, and bookmarks.
+- Find-in-page, WebView2 incognito tabs, and password/recovery-key protected Rust profiles with encrypted Aurora bookmarks/history and encrypted backup export/restore.
 - Visit list, history clearing, and downloads to the Downloads folder.
 - Aurora new-tab page, library menu, and settings for theme, search provider, start page, and animations.
 - Aurora logo and Windows application icon.
 
-The Rust version has not yet caught up with the Python prototype. Private windows, website permission controls, tracker blocking, protected profiles, and a download-location prompt are not implemented there. WebView2 profile data is not encrypted.
+The Rust version has not yet caught up with the former Python prototype. Separate private windows, website permission management, and tracker blocking are not implemented there. Protected profiles encrypt Aurora-owned bookmarks/history, but not WebView2 profile files such as cookies and cache.
 
 ### Run the Python version
 
@@ -186,7 +189,7 @@ Aurora source code is distributed under the MIT License. Third-party dependencie
 
 ## 简体中文
 
-Aurora 是一个面向 Windows 的实验性桌面浏览器项目，注重隐私并明确说明当前限制。本仓库包含两个实现：功能较完整的 Python/Qt WebEngine 原型，以及较新的 Rust/Wry 应用，后者使用 Microsoft Edge WebView2。
+Aurora 是一个面向 Windows 的实验性桌面浏览器项目，注重隐私并明确说明当前限制。主要应用使用 Rust、Wry 和 Microsoft Edge WebView2；旧版 Python/Qt WebEngine 应用暂时保留为功能迁移参考。
 
 ### 功能
 
@@ -204,11 +207,12 @@ Aurora 是一个面向 Windows 的实验性桌面浏览器项目，注重隐私�
 
 - 使用 Rust 和 Wry 构建桌面窗口，并调用系统安装的 WebView2 Runtime。
 - 多标签页、地址栏与搜索、前进/后退、刷新和书签。
+- 页面内查找、WebView2 隐身标签页，以及使用密码或恢复密钥保护的 Rust 配置文件（Aurora 书签/历史记录加密，并支持加密备份导出与恢复）。
 - 访问记录、清除历史，以及下载到 Downloads 文件夹。
 - Aurora 新标签页、资料库菜单，以及主题、搜索引擎、起始页和动画设置。
 - Aurora 标志和 Windows 应用图标。
 
-Rust 版本尚未实现 Python 原型的全部功能。目前不支持隐身窗口、网站权限管理、跟踪器拦截、受保护的配置文件和下载位置提示。WebView2 配置文件数据未加密。
+Rust 版本尚未实现旧版 Python 原型的全部功能。目前仍不支持独立隐身窗口、网站权限管理和跟踪器拦截。受保护配置文件仅加密 Aurora 书签和历史记录，不加密 WebView2 配置文件中的 Cookie、缓存等数据。
 
 ### 运行 Python 版本
 

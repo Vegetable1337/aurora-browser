@@ -1,3 +1,5 @@
+pub mod vault;
+
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 use winit::{
@@ -7,7 +9,7 @@ use winit::{
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     window::{Icon, Window, WindowId},
 };
-use wry::{PageLoadEvent, Rect, WebView, WebViewBuilder, dpi::LogicalPosition};
+use wry::{PageLoadEvent, PermissionResponse, Rect, WebView, WebViewBuilder, dpi::LogicalPosition};
 
 const CHROME_HEIGHT: u32 = 104;
 const HOME_PAGE: &str = "about:aurora";
@@ -34,6 +36,7 @@ struct BrowserTab {
     title: String,
     url: String,
     is_loading: bool,
+    is_private: bool,
     view: WebView,
 }
 
@@ -69,18 +72,33 @@ impl Default for BrowserSettings {
 }
 
 impl AuroraApp {
+    fn find_in_active_tab(&mut self, backwards: bool) {
+        let Ok(query) = serde_json::to_string(&self.find_query) else {
+            return;
+        };
+        let Some(tab) = self.active_tab_mut() else {
+            return;
+        };
+        let script = format!("window.find({query}, false, {backwards}, true);");
+        let _ = tab.view.evaluate_script(&script);
+    }
+
     fn active_tab_mut(&mut self) -> Option<&mut BrowserTab> {
         let id = self.active_tab?;
         self.tabs.iter_mut().find(|tab| tab.id == id)
     }
 
     fn create_tab(&mut self, url: &str) {
+        self.create_tab_with_mode(url, false);
+    }
+
+    fn create_tab_with_mode(&mut self, url: &str, is_private: bool) {
         let Some(window) = self.window.as_ref() else {
             return;
         };
-        let Some(context) = self.context.as_mut() else {
+        if !is_private && self.context.is_none() {
             return;
-        };
+        }
         let id = self.next_tab_id;
         self.next_tab_id += 1;
         let size = window.inner_size().to_logical::<u32>(window.scale_factor());
@@ -92,7 +110,11 @@ impl AuroraApp {
             .join("Downloads");
         let _ = fs::create_dir_all(&downloads_dir);
         let download_dir_for_handler = downloads_dir.clone();
-        let mut builder = WebViewBuilder::new_with_web_context(context);
+        let mut builder = if is_private {
+            WebViewBuilder::new()
+        } else {
+            WebViewBuilder::new_with_web_context(self.context.as_mut().expect("checked context"))
+        };
         let page_background = if self.settings.theme == "light" {
             (234, 240, 249, 255)
         } else {
@@ -109,6 +131,8 @@ impl AuroraApp {
             builder.with_url(url)
         };
         let builder = builder
+            .with_incognito(is_private)
+            .with_permission_handler(|_| PermissionResponse::Default)
             .with_focused(false)
             .with_visible(false)
             .with_background_color(page_background)
@@ -118,8 +142,17 @@ impl AuroraApp {
                     .and_then(|parsed| parsed.path_segments()?.next_back().map(str::to_owned))
                     .filter(|name| !name.is_empty())
                     .unwrap_or_else(|| "download".into());
-                *path = unique_download_path(&download_dir_for_handler, &name);
-                true
+                match rfd::FileDialog::new()
+                    .set_directory(&download_dir_for_handler)
+                    .set_file_name(&name)
+                    .save_file()
+                {
+                    Some(destination) => {
+                        *path = destination;
+                        true
+                    }
+                    None => false,
+                }
             })
             .with_bounds(Rect {
                 position: LogicalPosition::new(0, CHROME_HEIGHT).into(),
@@ -146,6 +179,7 @@ impl AuroraApp {
             title: "Новая вкладка".into(),
             url: target_url.into(),
             is_loading: true,
+            is_private,
             view,
         });
         self.select_tab(id);
@@ -210,11 +244,15 @@ impl AuroraApp {
         };
         if !bookmarks.iter().any(|saved| saved.url == bookmark.url) {
             bookmarks.push(bookmark);
-            if let (Some(path), Ok(json)) = (
-                &self.bookmarks_path,
-                serde_json::to_string_pretty(bookmarks),
-            ) {
-                let _ = fs::write(path, json);
+            if let Some(vault) = self.active_vault.as_ref() {
+                persist_vault_records(
+                    vault,
+                    "bookmarks",
+                    self.bookmarks.as_deref().unwrap_or(&[]),
+                    |entry| &entry.url,
+                );
+            } else if let Some(path) = &self.bookmarks_path {
+                let _ = write_json_atomically(path, bookmarks);
             }
         }
         self.refresh_chrome();
@@ -225,6 +263,9 @@ impl AuroraApp {
 
     fn record_history(&mut self, id: u64, url: String) {
         if url.starts_with("about:") || url.starts_with("data:") {
+            return;
+        }
+        if self.tabs.iter().any(|tab| tab.id == id && tab.is_private) {
             return;
         }
         let title = self
@@ -239,9 +280,15 @@ impl AuroraApp {
         history.retain(|entry| entry.url != url);
         history.insert(0, HistoryEntry { title, url });
         history.truncate(1000);
-        if let (Some(path), Ok(json)) = (&self.history_path, serde_json::to_string_pretty(history))
-        {
-            let _ = fs::write(path, json);
+        if let Some(vault) = self.active_vault.as_ref() {
+            persist_vault_records(
+                vault,
+                "history",
+                self.history.as_deref().unwrap_or(&[]),
+                |entry| &entry.url,
+            );
+        } else if let Some(path) = &self.history_path {
+            let _ = write_json_atomically(path, history);
         }
         self.refresh_chrome();
     }
@@ -253,7 +300,7 @@ impl AuroraApp {
         let tabs: Vec<_> = self
             .tabs
             .iter()
-            .map(|tab| serde_json::json!({"id": tab.id, "title": tab.title, "loading": tab.is_loading}))
+            .map(|tab| serde_json::json!({"id": tab.id, "title": tab.title, "loading": tab.is_loading, "private": tab.is_private}))
             .collect();
         let tabs_json = serde_json::to_string(&tabs).unwrap_or_else(|_| "[]".into());
         let active_json = serde_json::to_string(&self.active_tab).unwrap_or_else(|_| "null".into());
@@ -332,12 +379,66 @@ impl AuroraApp {
         let history = serde_json::to_string(self.history.as_deref().unwrap_or(&[]))
             .unwrap_or_else(|_| "[]".into());
         let settings = serde_json::to_string(&self.settings).unwrap_or_else(|_| "{}".into());
+        let profiles: Vec<_> = self
+            .profiles_root
+            .as_ref()
+            .map(|root| vault::ProfileVault::discover(root))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, name, _)| serde_json::json!({"id":id,"name":name}))
+            .collect();
+        let profiles = serde_json::to_string(&profiles).unwrap_or_else(|_| "[]".into());
+        let active_profile = self
+            .active_vault
+            .as_ref()
+            .map(vault::ProfileVault::display_name);
+        let active_profile =
+            serde_json::to_string(&active_profile).unwrap_or_else(|_| "null".into());
         let script = if open {
-            format!("window.setData({bookmarks}, {history}, {settings}); window.setOpen(true);")
+            format!(
+                "window.setData({bookmarks}, {history}, {settings}, {profiles}, {active_profile}); window.setOpen(true);"
+            )
         } else {
-            format!("window.setData({bookmarks}, {history}, {settings});")
+            format!(
+                "window.setData({bookmarks}, {history}, {settings}, {profiles}, {active_profile});"
+            )
         };
         let _ = overlay.evaluate_script(&script);
+    }
+
+    fn activate_vault(&mut self, new_vault: vault::ProfileVault) {
+        // Destroy views before their WebView2 context so profile data is released
+        // and the old cookie store is no longer attached to any tab.
+        self.overlay = None;
+        self.tabs.clear();
+        self.active_tab = None;
+        self.context = None;
+        let data_dir = new_vault.directory().join("WebView2");
+        let _ = fs::create_dir_all(&data_dir);
+        self.context = Some(wry::WebContext::new(Some(data_dir)));
+        self.bookmarks = Some(load_vault_records(&new_vault, "bookmarks"));
+        self.history = Some(load_vault_records(&new_vault, "history"));
+        self.bookmarks_path = None;
+        self.history_path = None;
+        self.active_vault = Some(new_vault);
+        self.create_tab(HOME_PAGE);
+    }
+
+    fn activate_default_profile(&mut self) {
+        self.overlay = None;
+        self.tabs.clear();
+        self.active_tab = None;
+        self.context = None;
+        let Some(data_dir) = self.default_data_dir.clone() else {
+            return;
+        };
+        self.context = Some(wry::WebContext::new(Some(data_dir.clone())));
+        self.bookmarks_path = Some(data_dir.join("bookmarks.json"));
+        self.history_path = Some(data_dir.join("history.json"));
+        self.bookmarks = Some(read_json(&self.bookmarks_path));
+        self.history = Some(read_json(&self.history_path));
+        self.active_vault = None;
+        self.create_tab(HOME_PAGE);
     }
 }
 
@@ -357,6 +458,10 @@ struct AuroraApp {
     overlay: Option<WebView>,
     settings: BrowserSettings,
     settings_path: Option<PathBuf>,
+    find_query: String,
+    profiles_root: Option<PathBuf>,
+    default_data_dir: Option<PathBuf>,
+    active_vault: Option<vault::ProfileVault>,
 }
 
 impl ApplicationHandler<UserEvent> for AuroraApp {
@@ -427,13 +532,15 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
             .ok()
             .and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default();
-        let context = wry::WebContext::new(Some(data_dir));
+        let context = wry::WebContext::new(Some(data_dir.clone()));
         self.bookmarks = Some(bookmarks);
         self.bookmarks_path = Some(bookmarks_path);
         self.history = Some(history);
         self.history_path = Some(history_path);
         self.settings = settings;
         self.settings_path = Some(settings_path);
+        self.profiles_root = Some(data_dir.parent().unwrap_or(&data_dir).join("Profiles"));
+        self.default_data_dir = Some(data_dir.clone());
         self.chrome = Some(chrome);
         self.window = Some(window);
         self.context = Some(context);
@@ -504,15 +611,190 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                         let _ = tab.view.evaluate_script("location.reload()");
                     }
                 }
+                "find_text" => {
+                    self.find_query = command.value.unwrap_or_default();
+                    self.find_in_active_tab(false);
+                }
+                "find_next" => self.find_in_active_tab(false),
+                "find_previous" => self.find_in_active_tab(true),
+                "find_close" => {
+                    if let Some(tab) = self.active_tab_mut() {
+                        let _ = tab
+                            .view
+                            .evaluate_script("window.getSelection()?.removeAllRanges()");
+                    }
+                }
                 "new_tab" => self.create_tab(HOME_PAGE),
+                "new_private_tab" => self.create_tab_with_mode(HOME_PAGE, true),
+                "create_profile" => {
+                    let request = command
+                        .value
+                        .as_deref()
+                        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok());
+                    if let (Some(root), Some(request)) = (self.profiles_root.as_ref(), request) {
+                        let name = request.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        let password = request
+                            .get("password")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        match vault::ProfileVault::create(root, name, password) {
+                            Ok(created) => {
+                                let recovery = serde_json::to_string(&created.recovery_key)
+                                    .unwrap_or_else(|_| "\"\"".into());
+                                if let Some(chrome) = self.chrome.as_ref() {
+                                    let _ = chrome.evaluate_script(&format!("window.alert('Сохраните этот ключ восстановления отдельно. Он будет показан только сейчас:\\n\\n'+{recovery})"));
+                                }
+                                self.activate_vault(created.vault);
+                            }
+                            Err(error) => eprintln!("Aurora profile creation failed: {error}"),
+                        }
+                    }
+                }
+                "unlock_profile" | "recover_profile" => {
+                    let request = command
+                        .value
+                        .as_deref()
+                        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok());
+                    if let (Some(root), Some(request)) = (self.profiles_root.as_ref(), request) {
+                        let id = request.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        let credential = request
+                            .get("credential")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let directory = vault::ProfileVault::discover(root)
+                            .into_iter()
+                            .find(|(profile_id, _, _)| profile_id == id)
+                            .map(|(_, _, path)| path);
+                        if let Some(directory) = directory {
+                            let result = if command.action == "recover_profile" {
+                                vault::ProfileVault::unlock_recovery(&directory, credential)
+                            } else {
+                                vault::ProfileVault::unlock_password(&directory, credential)
+                            };
+                            match result {
+                                Ok(profile) => self.activate_vault(profile),
+                                Err(error) => {
+                                    if let Some(chrome) = self.chrome.as_ref() {
+                                        let message = serde_json::to_string(&error.to_string())
+                                            .unwrap_or_else(|_| {
+                                                "\"Не удалось открыть профиль\"".into()
+                                            });
+                                        let _ = chrome.evaluate_script(&format!(
+                                            "window.showToast({message})"
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "default_profile" | "lock_profile" => self.activate_default_profile(),
+                "change_profile_password" => {
+                    if let (Some(profile), Some(password)) =
+                        (self.active_vault.as_mut(), command.value.as_deref())
+                    {
+                        let result = profile.change_password(password);
+                        if let Some(chrome) = self.chrome.as_ref() {
+                            let message = if result.is_ok() {
+                                "Пароль профиля изменён"
+                            } else {
+                                "Не удалось изменить пароль профиля"
+                            };
+                            let _ =
+                                chrome.evaluate_script(&format!("window.showToast('{}')", message));
+                        }
+                    }
+                }
+                "export_profile_backup" => {
+                    if let (Some(profile), Some(password)) =
+                        (self.active_vault.as_ref(), command.value.as_deref())
+                    {
+                        let destination = rfd::FileDialog::new()
+                            .add_filter("Резервная копия Aurora", &["aurorabk"])
+                            .set_file_name("aurora-profile.aurorabk")
+                            .save_file();
+                        if let Some(destination) = destination {
+                            let result = profile.export_backup(&destination, password);
+                            if let Some(chrome) = self.chrome.as_ref() {
+                                let message = if result.is_ok() {
+                                    "Резервная копия сохранена"
+                                } else {
+                                    "Не удалось создать резервную копию"
+                                };
+                                let _ = chrome
+                                    .evaluate_script(&format!("window.showToast('{}')", message));
+                            }
+                        }
+                    }
+                }
+                "restore_profile_backup" => {
+                    let request = command
+                        .value
+                        .as_deref()
+                        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok());
+                    if let (Some(root), Some(request)) = (self.profiles_root.clone(), request) {
+                        let backup_password = request
+                            .get("backup_password")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let profile_password = request
+                            .get("profile_password")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        if let Some(source) = rfd::FileDialog::new()
+                            .add_filter("Резервная копия Aurora", &["aurorabk"])
+                            .pick_file()
+                        {
+                            match vault::ProfileVault::restore_backup(
+                                &source,
+                                &root,
+                                backup_password,
+                                profile_password,
+                            ) {
+                                Ok(profile) => self.activate_vault(profile),
+                                Err(error) => {
+                                    if let Some(chrome) = self.chrome.as_ref() {
+                                        let message = serde_json::to_string(&error.to_string())
+                                            .unwrap_or_else(|_| {
+                                                "\"Не удалось восстановить профиль\"".into()
+                                            });
+                                        let _ = chrome.evaluate_script(&format!(
+                                            "window.showToast({message})"
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "delete_profile" => {
+                    if self.active_vault.is_none() {
+                        let id = command.value.as_deref().unwrap_or("");
+                        if let Some(root) = self.profiles_root.as_ref() {
+                            let directory = vault::ProfileVault::discover(root)
+                                .into_iter()
+                                .find(|(profile_id, _, _)| profile_id == id)
+                                .map(|(_, _, path)| path);
+                            if let Some(directory) = directory {
+                                let _ = vault::ProfileVault::delete_locked(&directory);
+                            }
+                        }
+                        self.update_overlay(false);
+                    }
+                }
                 "bookmark" => self.save_bookmark(),
                 "clear_history" => {
                     if let Some(history) = self.history.as_mut() {
                         history.clear();
-                        if let (Some(path), Ok(json)) =
-                            (&self.history_path, serde_json::to_string_pretty(history))
-                        {
-                            let _ = fs::write(path, json);
+                        if let Some(vault) = self.active_vault.as_ref() {
+                            persist_vault_records(
+                                vault,
+                                "history",
+                                &[] as &[HistoryEntry],
+                                |entry| &entry.url,
+                            );
+                        } else if let Some(path) = &self.history_path {
+                            let _ = write_json_atomically(path, history);
                         }
                     }
                     self.refresh_chrome();
@@ -546,11 +828,8 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                                 self.settings.homepage = value.to_owned();
                             }
                         }
-                        if let (Some(path), Ok(json)) = (
-                            &self.settings_path,
-                            serde_json::to_string_pretty(&self.settings),
-                        ) {
-                            let _ = fs::write(path, json);
+                        if let Some(path) = &self.settings_path {
+                            let _ = write_json_atomically(path, &self.settings);
                         }
                         if let Some(chrome) = self.chrome.as_ref() {
                             let _ = chrome.evaluate_script(&format!(
@@ -619,11 +898,17 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                             entry.title = current_title;
                         }
                     }
-                    if let (Some(path), Some(history)) = (&self.history_path, self.history.as_ref())
+                    if let Some(vault) = self.active_vault.as_ref() {
+                        persist_vault_records(
+                            vault,
+                            "history",
+                            self.history.as_deref().unwrap_or(&[]),
+                            |entry| &entry.url,
+                        );
+                    } else if let (Some(path), Some(history)) =
+                        (&self.history_path, self.history.as_ref())
                     {
-                        if let Ok(json) = serde_json::to_string_pretty(history) {
-                            let _ = fs::write(path, json);
-                        }
+                        let _ = write_json_atomically(path, history);
                     }
                     self.refresh_chrome();
                 }
@@ -704,32 +989,58 @@ fn resolve_input(input: &str, search_engine: &str) -> String {
     }
 }
 
-fn unique_download_path(directory: &std::path::Path, filename: &str) -> PathBuf {
-    let safe_name = std::path::Path::new(filename)
-        .file_name()
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| std::ffi::OsStr::new("download"));
-    let path = directory.join(safe_name);
-    if !path.exists() {
-        return path;
+/// Persist browser state through a same-directory temporary file so a crash
+/// cannot leave the previous JSON file half-written.
+fn write_json_atomically<T: Serialize>(path: &std::path::Path, value: &T) -> std::io::Result<()> {
+    let json = serde_json::to_vec_pretty(value)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let mut temporary = path.as_os_str().to_owned();
+    temporary.push(".tmp");
+    let temporary = PathBuf::from(temporary);
+    fs::write(&temporary, json)?;
+    if let Err(error) = fs::rename(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
     }
-    let stem = std::path::Path::new(safe_name)
-        .file_stem()
-        .unwrap_or_else(|| std::ffi::OsStr::new("download"));
-    let extension = std::path::Path::new(safe_name).extension();
-    for index in 1..=9999 {
-        let mut candidate_name = std::ffi::OsString::from(stem);
-        candidate_name.push(format!(" ({index})"));
-        if let Some(extension) = extension {
-            candidate_name.push(".");
-            candidate_name.push(extension);
-        }
-        let candidate = directory.join(candidate_name);
-        if !candidate.exists() {
-            return candidate;
-        }
+    Ok(())
+}
+
+fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &Option<PathBuf>) -> T {
+    path.as_ref()
+        .and_then(|path| fs::read(path).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+fn load_vault_records<T: for<'de> Deserialize<'de>>(
+    vault: &vault::ProfileVault,
+    domain: &str,
+) -> Vec<T> {
+    vault
+        .list(domain)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(_, bytes)| serde_json::from_slice(&bytes).ok())
+        .collect()
+}
+
+fn persist_vault_records<T: Serialize>(
+    vault: &vault::ProfileVault,
+    domain: &str,
+    entries: &[T],
+    identity: impl Fn(&T) -> &str,
+) {
+    let mut encrypted_records = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let Ok(id) = vault.opaque_record_id(domain, identity(entry)) else {
+            continue;
+        };
+        let Ok(bytes) = serde_json::to_vec(entry) else {
+            continue;
+        };
+        encrypted_records.push((id, bytes));
     }
-    path
+    let _ = vault.replace_records(domain, &encrypted_records);
 }
 
 fn main() -> wry::Result<()> {

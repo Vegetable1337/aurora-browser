@@ -14,6 +14,7 @@
     .tab.active{position:relative;z-index:1;background:#252d3b;border-color:#ffffff16;color:#f4f6fb;box-shadow:inset 0 1px #ffffff20}
     .tab.closing{opacity:0;transform:translateY(5px) scale(.92);filter:blur(4px)}
     .favicon{width:17px;height:17px;border-radius:7px;background:linear-gradient(145deg,#dce7ff,#94a9d5);color:#1b2437;font-size:10px;font-weight:700;display:grid;place-items:center}
+    .favicon.private{background:linear-gradient(145deg,#cbd3e0,#8e9aac);font-size:12px}
     .favicon.loading{color:transparent;background:conic-gradient(from 0deg,#b9ceff 0 65%,#ffffff24 65% 100%);animation:spin .8s linear infinite}
     .tab-title{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .close{border:0;background:transparent;color:#aeb6c7;border-radius:50%;font-size:16px;width:23px;height:23px;cursor:pointer}
@@ -22,7 +23,7 @@
     .win{width:46px;height:34px;border:0;background:transparent;color:#bdc1c6;font-size:14px;cursor:pointer;transition:background .16s,color .16s}
     .win:hover,.newtab:hover,.close:hover{background:#ffffff20}
     .win:last-child:hover{background:#e74747;color:#fff}
-    .nav{height:64px;display:flex;align-items:center;padding:0 12px;gap:8px;background:#171d28;border-bottom:1px solid #ffffff12;box-shadow:0 8px 25px #0002}
+    .nav{height:64px;position:relative;display:flex;align-items:center;padding:0 12px;gap:8px;background:#171d28;border-bottom:1px solid #ffffff12;box-shadow:0 8px 25px #0002}
     .icon{width:34px;height:34px;border:1px solid transparent;border-radius:50%;background:transparent;color:#bbc5d8;font-size:20px;display:grid;place-items:center;cursor:pointer;transition:.16s}
     .icon:hover,.icon[aria-expanded="true"]{background:#ffffff14;border-color:#ffffff12;color:#fff}
     .address{height:42px;border-radius:24px;background:#ffffff0b;border:1px solid #ffffff17;display:flex;align-items:center;flex:1;padding:0 15px;gap:10px;box-shadow:inset 0 1px #ffffff0b;backdrop-filter:blur(24px)}
@@ -37,6 +38,8 @@
     .menu-item{width:100%;border:1px solid transparent;background:transparent;color:#eff2f8;text-align:left;border-radius:14px;padding:10px 12px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .menu-item:hover{background:#ffffff15;border-color:#ffffff0e}
     .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#252d3dea;border:1px solid #ffffff25;border-radius:18px;padding:11px 17px;box-shadow:0 8px 30px #0007;backdrop-filter:blur(24px);display:none}
+    .find-box{position:absolute;right:12px;top:50px;z-index:30;display:none;align-items:center;gap:5px;width:min(390px,calc(100vw - 24px));padding:8px;border:1px solid #ffffff24;border-radius:16px;background:#222a38f5;box-shadow:0 14px 38px #0007;backdrop-filter:blur(25px)}
+    .find-box.open{display:flex}.find-box input{height:34px;min-width:0;padding:0 9px;border-radius:10px;background:#ffffff0b}.find-box button{flex:0 0 32px;height:32px;border:0;border-radius:10px;background:transparent;color:inherit;cursor:pointer}.find-box button:hover{background:#ffffff16}
     html.no-motion *,html.no-motion *::before,html.no-motion *::after{transition:none!important;animation:none!important}
     @keyframes tab-appear{from{opacity:0;transform:translateY(5px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
     @keyframes spin{to{transform:rotate(360deg)}}
@@ -71,6 +74,12 @@
       <button class="icon menu" id="menu-button" title="Библиотека и настройки" aria-haspopup="dialog" aria-expanded="false">⋮</button>
     </div>
   </div>
+  <div class="find-box" id="find-box" role="search" aria-label="Найти на странице">
+    <input id="find-input" placeholder="Найти на странице" aria-label="Текст для поиска">
+    <button id="find-prev" title="Предыдущее совпадение" aria-label="Предыдущее">↑</button>
+    <button id="find-next" title="Следующее совпадение" aria-label="Следующее">↓</button>
+    <button id="find-close" title="Закрыть поиск" aria-label="Закрыть">×</button>
+  </div>
   <div class="toast" id="toast"></div>
   <script>
     const address = document.querySelector('#address');
@@ -79,6 +88,10 @@
       catch (_) { window.showToast('Не удалось отправить команду в Aurora'); }
     }
     let menuOpen = false;
+    const findBox = document.querySelector('#find-box');
+    const findInput = document.querySelector('#find-input');
+    function openFind() { findBox.classList.add('open'); findInput.focus(); findInput.select(); }
+    function closeFind() { if (!findBox.classList.contains('open')) return; findBox.classList.remove('open'); findInput.value = ''; send('find_close'); address.focus(); }
     function setMenuOpen(open) {
       menuOpen = open;
       document.querySelector('#menu-button').setAttribute('aria-expanded', String(open));
@@ -103,7 +116,7 @@
           if (e.button === 1) { e.preventDefault(); e.stopPropagation(); closeTabAnimated(tab.id, el); }
         });
         const icon = document.createElement('span');
-          icon.className = 'favicon'; icon.textContent = 'A';
+          icon.className = 'favicon'; icon.textContent = tab.private ? '◉' : 'A';
         const title = document.createElement('span');
         title.className = 'tab-title'; title.textContent = tab.title;
         const close = document.createElement('button');
@@ -115,6 +128,8 @@
           el.querySelector('.tab-title').textContent = tab.title;
         }
         el.querySelector('.favicon').classList.toggle('loading', tab.loading === true);
+        el.querySelector('.favicon').classList.toggle('private', tab.private === true);
+        if (!tab.loading) el.querySelector('.favicon').textContent = tab.private ? '◉' : 'A';
         const current = root.children[index];
         if (current !== el) root.insertBefore(el, current || null);
         old.delete(String(tab.id));
@@ -139,6 +154,14 @@
     address.addEventListener('keydown', e => {
       if (e.key === 'Enter') { send('navigate', address.value); address.blur(); }
     });
+    findInput.addEventListener('input', () => send('find_text', findInput.value));
+    findInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); send(e.shiftKey ? 'find_previous' : 'find_next'); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
+    });
+    document.querySelector('#find-prev').onclick = () => send('find_previous');
+    document.querySelector('#find-next').onclick = () => send('find_next');
+    document.querySelector('#find-close').onclick = closeFind;
     document.querySelectorAll('[data-action]').forEach(button => button.onclick = () => send(button.dataset.action));
     document.querySelector('#menu-button').onclick = () => setMenuOpen(!menuOpen);
     document.addEventListener('pointerdown', e => {
@@ -152,10 +175,16 @@
     });
     document.addEventListener('keydown', e => {
       if (e.ctrlKey && e.key.toLowerCase() === 'l') { e.preventDefault(); address.focus(); address.select(); }
+      else if (e.ctrlKey && e.key.toLowerCase() === 'f') { e.preventDefault(); openFind(); }
+      else if (e.ctrlKey && e.key.toLowerCase() === 'g') { e.preventDefault(); send(e.shiftKey ? 'find_previous' : 'find_next'); }
       else if (e.key === 'Escape') { closeMenu(); }
       else if (e.ctrlKey && e.key.toLowerCase() === 't') { e.preventDefault(); closeMenu(); send('new_tab'); }
+      else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'n') { e.preventDefault(); send('new_private_tab'); }
       else if (e.ctrlKey && e.key.toLowerCase() === 'w') { e.preventDefault(); send('close_tab', null, window.activeTab); }
       else if (e.ctrlKey && e.key.toLowerCase() === 'r') { e.preventDefault(); send('reload'); }
+      else if (e.ctrlKey && e.key.toLowerCase() === 'd') { e.preventDefault(); send('bookmark'); }
+      else if (e.ctrlKey && e.key.toLowerCase() === 'j') { e.preventDefault(); send('open_downloads'); }
+      else if (e.ctrlKey && e.key.toLowerCase() === 'h') { e.preventDefault(); setMenuOpen(true); }
     });
   </script>
 </body>

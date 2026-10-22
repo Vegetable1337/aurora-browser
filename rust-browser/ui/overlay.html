@@ -50,7 +50,16 @@
         <div class="head"><span>Библиотека</span><button onclick="closeOverlay()" aria-label="Закрыть">×</button></div>
         <div class="section-title">Закладки</div><div class="list" id="bookmarks"></div>
         <div class="section-title">Недавно посещённые</div><div class="list" id="history"></div>
+        <div class="section-title">Профиль</div><div class="empty" id="active-profile">Обычный профиль</div>
+        <div class="list" id="profiles"></div>
+        <button class="action" onclick="createProfile()">＋　Создать защищённый профиль</button>
+        <button class="action" onclick="send('default_profile');closeOverlay()">◉　Обычный профиль</button>
+        <button class="action" id="profile-lock" onclick="send('lock_profile');closeOverlay()" hidden>🔒　Заблокировать защищённый профиль</button>
+        <button class="action" id="profile-password" onclick="changeProfilePassword()" hidden>🔑　Изменить пароль профиля</button>
+        <button class="action" id="profile-export" onclick="exportProfileBackup()" hidden>⇧　Сохранить резервную копию</button>
+        <button class="action" onclick="restoreProfileBackup()">⇩　Восстановить профиль из копии</button>
         <div class="divider"></div>
+        <button class="action" onclick="send('new_private_tab');closeOverlay()">◉　Новая приватная вкладка</button>
         <button class="action" onclick="send('open_downloads');closeOverlay()">↓　Открыть папку загрузок</button>
         <button class="action" onclick="send('clear_history');closeOverlay()">⌫　Очистить историю</button>
         <button class="action" onclick="showSettings()">⚙　Настройки</button>
@@ -86,12 +95,16 @@
 <script>
   const scrim=document.querySelector('#scrim'),card=document.querySelector('#menu-card');
   function send(action,value){window.ipc.postMessage(JSON.stringify({action,value}));}
+  function createProfile(){const name=prompt('Имя профиля:');if(!name)return;const password=prompt('Новый пароль (не менее 12 символов):');if(!password)return;send('create_profile',JSON.stringify({name,password}));closeOverlay();}
+  function changeProfilePassword(){const password=prompt('Введите новый пароль (не менее 12 символов):');if(password)send('change_profile_password',password);}
+  function exportProfileBackup(){const password=prompt('Придумайте пароль для резервной копии (не менее 12 символов):');if(password)send('export_profile_backup',password);}
+  function restoreProfileBackup(){const backupPassword=prompt('Пароль резервной копии:');if(!backupPassword)return;const profilePassword=prompt('Пароль защищённого профиля, который был установлен при создании копии:');if(profilePassword)send('restore_profile_backup',JSON.stringify({backup_password:backupPassword,profile_password:profilePassword}));closeOverlay();}
   function closeOverlay(){scrim.classList.remove('open');}
   function showSettings(){document.querySelector('#menu-view').hidden=true;document.querySelector('#settings-view').hidden=false;card.classList.add('settings-mode');selectPane('general');}
   function showMenu(){document.querySelector('#settings-view').hidden=true;document.querySelector('#menu-view').hidden=false;card.classList.remove('settings-mode');}
   function selectPane(name){document.querySelectorAll('.nav-item').forEach(button=>button.classList.toggle('active',button.dataset.pane===name));document.querySelectorAll('.settings-pane').forEach(pane=>pane.hidden=pane.dataset.content!==name);}
   function fill(target,items){const root=document.querySelector(target);root.replaceChildren();if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent=target==='#bookmarks'?'Пока нет сохранённых страниц':'История пока пуста';root.append(empty);return;}for(const item of items.slice(0,10)){const button=document.createElement('button');button.className='item';button.textContent=item.title||item.url;button.title=item.url;button.onclick=()=>{send('open_url',item.url);closeOverlay();};root.append(button);}}
-  window.setData=(bookmarks,history,settings)=>{fill('#bookmarks',bookmarks);fill('#history',history);document.querySelector('#engine').value=settings.search_engine||'duckduckgo';document.querySelector('#homepage').value=settings.homepage||'aurora';document.querySelector('#theme').value=settings.theme||'dark';document.querySelector('#animations').checked=settings.animations!==false;document.documentElement.classList.toggle('no-motion',settings.animations===false);document.documentElement.classList.toggle('light',settings.theme==='light');};
+  window.setData=(bookmarks,history,settings,profiles=[],activeProfile=null)=>{fill('#bookmarks',bookmarks);fill('#history',history);document.querySelector('#engine').value=settings.search_engine||'duckduckgo';document.querySelector('#homepage').value=settings.homepage||'aurora';document.querySelector('#theme').value=settings.theme||'dark';document.querySelector('#animations').checked=settings.animations!==false;document.documentElement.classList.toggle('no-motion',settings.animations===false);document.documentElement.classList.toggle('light',settings.theme==='light');document.querySelector('#active-profile').textContent=activeProfile||'Обычный профиль';document.querySelector('#profile-lock').hidden=!activeProfile;document.querySelector('#profile-password').hidden=!activeProfile;document.querySelector('#profile-export').hidden=!activeProfile;const root=document.querySelector('#profiles');root.replaceChildren();for(const profile of profiles){if(profile.name===activeProfile)continue;const row=document.createElement('div');row.style.display='flex';row.style.gap='4px';const button=document.createElement('button');button.className='item';button.style.flex='1';button.textContent='🔐　'+profile.name;button.onclick=()=>{const credential=prompt('Пароль профиля (Отмена — ключ восстановления):');if(credential)send('unlock_profile',JSON.stringify({id:profile.id,credential}));else{const recovery=prompt('Введите ключ восстановления:');if(recovery)send('recover_profile',JSON.stringify({id:profile.id,credential:recovery}));}closeOverlay();};const remove=document.createElement('button');remove.className='item';remove.textContent='×';remove.title='Удалить профиль';remove.setAttribute('aria-label','Удалить профиль '+profile.name);remove.onclick=()=>{if(confirm('Безвозвратно удалить защищённый профиль «'+profile.name+'»?')){send('delete_profile',profile.id);closeOverlay();}};row.append(button,remove);root.append(row);}};
   window.setOpen=open=>{if(open){showMenu();scrim.classList.add('open');}else closeOverlay();};
   scrim.addEventListener('pointerdown',e=>{if(e.target===scrim)closeOverlay();});
   scrim.addEventListener('transitionend',e=>{if(e.target===scrim&&e.propertyName==='opacity'&&!scrim.classList.contains('open'))send('overlay_hidden');});
