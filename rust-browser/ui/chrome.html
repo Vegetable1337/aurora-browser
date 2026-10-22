@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root{color-scheme:dark;font:13px "Segoe UI",Arial,sans-serif;background:#11151f;color:#f2f4fa}
+    *{box-sizing:border-box}
+    body{margin:0;background:radial-gradient(ellipse 60% 50% at 45% -10%,#536fa42b,transparent 75%),#11151f;overflow:hidden}
+    .tabs{height:40px;display:flex;align-items:end;padding:6px 8px 0;background:#171d28;gap:3px;user-select:none}
+    #tab-list{display:flex;align-items:end;gap:2px;flex:0 1 auto;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+    #tab-list::-webkit-scrollbar{display:none}
+    .tab{height:32px;width:230px;max-width:32vw;background:#ffffff09;border:1px solid #ffffff08;border-bottom:0;border-radius:14px 14px 0 0;display:flex;align-items:center;padding:0 11px;gap:9px;color:#abb4c7;cursor:pointer;transition:background .22s ease,border-color .22s ease,transform .24s cubic-bezier(.2,.8,.2,1),opacity .24s ease,filter .24s ease;animation:tab-appear .24s cubic-bezier(.2,.8,.2,1)}
+    .tab.active{position:relative;z-index:1;background:#252d3b;border-color:#ffffff16;color:#f4f6fb;box-shadow:inset 0 1px #ffffff20}
+    .tab.closing{opacity:0;transform:translateY(5px) scale(.92);filter:blur(4px)}
+    .favicon{width:17px;height:17px;border-radius:7px;background:linear-gradient(145deg,#dce7ff,#94a9d5);color:#1b2437;font-size:10px;font-weight:700;display:grid;place-items:center}
+    .favicon.loading{color:transparent;background:conic-gradient(from 0deg,#b9ceff 0 65%,#ffffff24 65% 100%);animation:spin .8s linear infinite}
+    .tab-title{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .close{border:0;background:transparent;color:#aeb6c7;border-radius:50%;font-size:16px;width:23px;height:23px;cursor:pointer}
+    .newtab{height:29px;width:29px;border:1px solid #ffffff10;border-radius:50%;background:#ffffff0b;color:#e8ecf5;font-size:20px;margin:0 0 2px;cursor:pointer}
+    .spacer{flex:1;min-width:14px}
+    .win{width:46px;height:34px;border:0;background:transparent;color:#bdc1c6;font-size:14px;cursor:pointer;transition:background .16s,color .16s}
+    .win:hover,.newtab:hover,.close:hover{background:#ffffff20}
+    .win:last-child:hover{background:#e74747;color:#fff}
+    .nav{height:64px;display:flex;align-items:center;padding:0 12px;gap:8px;background:#171d28;border-bottom:1px solid #ffffff12;box-shadow:0 8px 25px #0002}
+    .icon{width:34px;height:34px;border:1px solid transparent;border-radius:50%;background:transparent;color:#bbc5d8;font-size:20px;display:grid;place-items:center;cursor:pointer;transition:.16s}
+    .icon:hover,.icon[aria-expanded="true"]{background:#ffffff14;border-color:#ffffff12;color:#fff}
+    .address{height:42px;border-radius:24px;background:#ffffff0b;border:1px solid #ffffff17;display:flex;align-items:center;flex:1;padding:0 15px;gap:10px;box-shadow:inset 0 1px #ffffff0b;backdrop-filter:blur(24px)}
+    .address:focus-within{background:#ffffff10;border-color:#b7ccff9e;box-shadow:0 0 0 3px #93b4ff22,inset 0 1px #ffffff14}
+    .lock{color:#aebbd3;font-size:13px}
+    input{width:100%;border:0;outline:0;background:transparent;color:#f2f4fa;font:14px "Segoe UI",Arial,sans-serif}
+    .menu-wrap{position:relative}
+    .menu{font-size:21px;width:32px}
+    .menu-pop{display:none;position:absolute;right:0;top:42px;z-index:20;width:320px;max-height:70vh;overflow:auto;background:linear-gradient(150deg,#252c3bea,#171c27f5);border:1px solid #ffffff24;border-radius:24px;padding:10px;box-shadow:0 22px 70px #0009,inset 0 1px #ffffff22;backdrop-filter:blur(34px) saturate(145%)}
+    .menu-pop.open{display:block}
+    .menu-head{color:#aab5ca;padding:10px 11px 5px;font-size:11px;font-weight:650;letter-spacing:.11em;text-transform:uppercase}
+    .menu-item{width:100%;border:1px solid transparent;background:transparent;color:#eff2f8;text-align:left;border-radius:14px;padding:10px 12px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .menu-item:hover{background:#ffffff15;border-color:#ffffff0e}
+    .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#252d3dea;border:1px solid #ffffff25;border-radius:18px;padding:11px 17px;box-shadow:0 8px 30px #0007;backdrop-filter:blur(24px);display:none}
+    html.no-motion *,html.no-motion *::before,html.no-motion *::after{transition:none!important;animation:none!important}
+    @keyframes tab-appear{from{opacity:0;transform:translateY(5px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    html.light,html.light body{color:#1d2638;background:#eaf0f9}
+    html.light .tabs{background:#f2f5fa}html.light .tab{background:#1628490a;color:#68758a;border-color:#1628490b}
+    html.light .tab.active{background:#e4eaf4;color:#1d2638;border-color:#d7dfeb}
+    html.light .nav{background:#f2f5fa;border-color:#16284914}
+    html.light .icon{color:#51617b}html.light .icon:hover,html.light .icon[aria-expanded="true"]{background:#1628490c;color:#1d2638}
+    html.light .address{background:#ffffffb5;border-color:#1628491c;box-shadow:0 2px 9px #1828470b}
+    html.light input{color:#1d2638}html.light input::placeholder,html.light .lock{color:#78869c}
+    html.light .win,html.light .newtab{color:#43526a}html.light .newtab{background:#ffffff99;border-color:#16284913}
+    html.light .win:last-child:hover{background:#e74747;color:#fff}
+    html.light .toast{background:#f5f8ffed;border-color:#ffffff;color:#26324a}
+  </style>
+</head>
+<body>
+  <div class="tabs" id="tabs">
+    <div id="tab-list"></div>
+    <button class="newtab" title="Новая вкладка" onclick="send('new_tab')">+</button>
+    <div class="spacer" id="drag-space"></div>
+    <button class="win" title="Свернуть" onclick="send('minimize')">−</button>
+    <button class="win" title="Развернуть" onclick="send('maximize')">□</button>
+    <button class="win" title="Закрыть" onclick="send('close')">×</button>
+  </div>
+  <div class="nav">
+    <button class="icon" data-action="back" title="Назад">‹</button>
+    <button class="icon" data-action="forward" title="Вперёд">›</button>
+    <button class="icon" data-action="reload" title="Обновить">⟳</button>
+    <div class="address"><span class="lock">◉</span><input id="address" autocomplete="off" spellcheck="false" placeholder="Поиск DuckDuckGo или введите URL" aria-label="Адрес или запрос"></div>
+    <button class="icon" title="Добавить в закладки" onclick="send('bookmark')">☆</button>
+    <div class="menu-wrap">
+      <button class="icon menu" id="menu-button" title="Библиотека и настройки" aria-haspopup="dialog" aria-expanded="false">⋮</button>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script>
+    const address = document.querySelector('#address');
+    function send(action, value, tab_id) {
+      try { window.ipc.postMessage(JSON.stringify({action, value, tab_id})); }
+      catch (_) { window.showToast('Не удалось отправить команду в Aurora'); }
+    }
+    let menuOpen = false;
+    function setMenuOpen(open) {
+      menuOpen = open;
+      document.querySelector('#menu-button').setAttribute('aria-expanded', String(open));
+      send('menu_open', String(open));
+    }
+    window.syncMenu = open => {
+      menuOpen = open;
+      document.querySelector('#menu-button').setAttribute('aria-expanded', String(open));
+    };
+    window.renderTabs = (tabs, active) => {
+      window.activeTab = active;
+      const root = document.querySelector('#tab-list');
+      const old = new Map([...root.children].map(el => [el.dataset.tabId, el]));
+      tabs.forEach((tab, index) => {
+        let el = old.get(String(tab.id));
+        if (!el) {
+          el = document.createElement('div');
+          el.dataset.tabId = tab.id;
+        el.className = 'tab' + (tab.id === active ? ' active' : '');
+        el.onclick = () => { closeMenu(); send('select_tab', null, tab.id); };
+        el.addEventListener('auxclick', e => {
+          if (e.button === 1) { e.preventDefault(); e.stopPropagation(); closeTabAnimated(tab.id, el); }
+        });
+        const icon = document.createElement('span');
+          icon.className = 'favicon'; icon.textContent = 'A';
+        const title = document.createElement('span');
+        title.className = 'tab-title'; title.textContent = tab.title;
+        const close = document.createElement('button');
+        close.className = 'close'; close.title = 'Закрыть вкладку'; close.textContent = '×';
+        close.onclick = e => { e.stopPropagation(); closeTabAnimated(tab.id, el); };
+        el.append(icon, title, close); root.append(el);
+        } else {
+          el.classList.toggle('active', tab.id === active);
+          el.querySelector('.tab-title').textContent = tab.title;
+        }
+        el.querySelector('.favicon').classList.toggle('loading', tab.loading === true);
+        const current = root.children[index];
+        if (current !== el) root.insertBefore(el, current || null);
+        old.delete(String(tab.id));
+      });
+      for (const stale of old.values()) stale.remove();
+    };
+    window.setAddress = url => { if (document.activeElement !== address) address.value = url || ''; };
+    window.showToast = text => {
+      const toast = document.querySelector('#toast'); toast.textContent = text; toast.style.display = 'block';
+      setTimeout(() => toast.style.display = 'none', 1800);
+    };
+    function closeMenu() {
+      if (menuOpen) setMenuOpen(false);
+    }
+    window.closeMenu = closeMenu;
+    function closeTabAnimated(id, element) {
+      if (document.documentElement.classList.contains('no-motion')) { send('close_tab', null, id); return; }
+      element.classList.add('closing');
+      setTimeout(() => send('close_tab', null, id), 250);
+    }
+    window.renderTabs([{id: 0, title: 'Новая вкладка'}], 0);
+    address.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { send('navigate', address.value); address.blur(); }
+    });
+    document.querySelectorAll('[data-action]').forEach(button => button.onclick = () => send(button.dataset.action));
+    document.querySelector('#menu-button').onclick = () => setMenuOpen(!menuOpen);
+    document.addEventListener('pointerdown', e => {
+      if (!e.target.closest('.menu-wrap')) closeMenu();
+    });
+    document.querySelector('#tabs').addEventListener('mousedown', e => {
+      if (e.target.id === 'tabs' || e.target.id === 'drag-space') send('drag');
+    });
+    document.querySelector('#tabs').addEventListener('dblclick', e => {
+      if (e.target.id === 'tabs' || e.target.id === 'drag-space') send('maximize');
+    });
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.key.toLowerCase() === 'l') { e.preventDefault(); address.focus(); address.select(); }
+      else if (e.key === 'Escape') { closeMenu(); }
+      else if (e.ctrlKey && e.key.toLowerCase() === 't') { e.preventDefault(); closeMenu(); send('new_tab'); }
+      else if (e.ctrlKey && e.key.toLowerCase() === 'w') { e.preventDefault(); send('close_tab', null, window.activeTab); }
+      else if (e.ctrlKey && e.key.toLowerCase() === 'r') { e.preventDefault(); send('reload'); }
+    });
+  </script>
+</body>
+</html>

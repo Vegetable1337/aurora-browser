@@ -10,12 +10,12 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from PySide6.QtCore import QStandardPaths, QTimer, QUrl, Qt
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import QEvent, QStandardPaths, QTimer, QUrl, Qt
+from PySide6.QtGui import QAction, QKeySequence, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QInputDialog, QLabel, QLineEdit,
-    QListWidget, QMainWindow, QMessageBox, QPushButton, QTabWidget, QToolBar,
-    QVBoxLayout, QWidget,
+    QListWidget, QMainWindow, QMenu, QMessageBox, QSizePolicy, QTabBar,
+    QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEnginePermission
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -41,8 +41,32 @@ class BrowserTab(QWidget):
         else:
             self.view.setHtml("""
                 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-                <style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:radial-gradient(ellipse at 50% 35%,#293047,#12151e 65%);color:#f2f4fa;font:16px system-ui,sans-serif}.card{text-align:center;padding:48px 64px;border:1px solid #ffffff20;border-radius:28px;background:#ffffff0b;box-shadow:0 24px 80px #0005}h1{font-size:48px;letter-spacing:.12em;font-weight:500;margin:0 0 10px}p{color:#b6bdd0;margin:0}</style>
-                </head><body><main class="card"><h1>AURORA</h1><p>Search or enter an address to begin</p></main></body></html>
+                <title>Новая вкладка</title>
+                <style>
+                *{box-sizing:border-box}html,body{min-height:100%;margin:0}body{font:15px/1.5 Inter,"Segoe UI",system-ui,sans-serif;color:#f4f3fa;background:#35363a;overflow:auto}
+                body:before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 48% 38% at 50% 25%,#52627a20,transparent 78%)}
+                main{position:relative;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:clamp(70px,14vh,150px) 24px 42px}
+                .mark{display:grid;place-items:center;width:58px;height:58px;border:1px solid #ffffff22;border-radius:20px;background:linear-gradient(145deg,#79869a,#525967 58%,#3e4249);box-shadow:0 12px 42px #0003;color:white;font-size:29px}
+                h1{margin:19px 0 2px;font-size:34px;letter-spacing:.19em;font-weight:600}.sub{margin:0;color:#c0c1c5;font-size:14px}
+                form{display:flex;align-items:center;gap:12px;width:min(620px,100%);height:58px;margin:35px 0 34px;padding:6px 8px 6px 19px;border:1px solid #ffffff1b;border-radius:30px;background:#292a2d;box-shadow:0 2px 8px #0003;transition:.2s}
+                form:focus-within{border-color:#a9c7ff;background:#292a2d;box-shadow:0 0 0 2px #a9c7ff44,0 4px 12px #0003}form span{color:#c2c3c7;font-size:20px}
+                input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:#f5f4fb;font:inherit;font-size:15px}input::placeholder{color:#8e8b9f}
+                button{height:42px;padding:0 17px;border:0;border-radius:22px;background:#4b4c50;color:white;font:600 13px/1 "Segoe UI",sans-serif;cursor:pointer}button:hover{background:#5a5b60}
+                .section{width:min(620px,100%)}.section-title{margin:0 0 13px;color:#858497;font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase}
+                .shortcuts{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.shortcut{display:flex;flex-direction:column;align-items:center;gap:9px;min-width:0;padding:9px 6px;border:1px solid transparent;border-radius:12px;background:transparent;color:#e8e8ea;text-decoration:none;transition:.18s}
+                .shortcut:hover{background:#ffffff12}.icon{display:grid;place-items:center;flex:0 0 48px;width:48px;height:48px;border:1px solid #ffffff14;border-radius:50%;background:#45464a;color:#e3e4e7;font-size:18px;font-weight:600}.label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+                .foot{margin-top:auto;padding-top:56px;color:#777587;font-size:12px}.private{color:#c8b8ff}
+                @media(max-width:560px){.shortcuts{grid-template-columns:repeat(2,1fr)}main{padding-top:12vh}h1{font-size:29px}}
+                </style></head><body><main>
+                <div class="mark">✦</div><h1>AURORA</h1><p class="sub">Всё начинается с поиска</p>
+                <form action="https://duckduckgo.com/" method="get"><span>⌕</span><input name="q" autofocus autocomplete="off" placeholder="Поиск в интернете" aria-label="Поиск в интернете"><button type="submit">Найти</button></form>
+                <section class="section"><p class="section-title">Быстрый доступ</p><div class="shortcuts">
+                <a class="shortcut" href="https://wikipedia.org"><span class="icon">W</span><span class="label">Wikipedia</span></a>
+                <a class="shortcut" href="https://youtube.com"><span class="icon">▶</span><span class="label">YouTube</span></a>
+                <a class="shortcut" href="https://github.com"><span class="icon">⌘</span><span class="label">GitHub</span></a>
+                <a class="shortcut" href="https://duckduckgo.com"><span class="icon">⌕</span><span class="label">DuckDuckGo</span></a>
+                </div></section>
+                <div class="foot">Aurora — ваш браузер</div></main></body></html>
             """, QUrl("about:blank"))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -54,6 +78,7 @@ class AuroraWindow(QMainWindow):
         super().__init__()
         self.private_mode = private_mode
         self.setWindowTitle("Aurora — Private Window" if private_mode else "Aurora")
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         if private_mode:
             self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.resize(1440, 900)
@@ -77,26 +102,58 @@ class AuroraWindow(QMainWindow):
 
         self.tabs = QTabWidget(self)
         self.tabs.setDocumentMode(True)
-        self.tabs.setMovable(True)
-        self.tabs.setTabsClosable(True)
+        self.tabs.tabBar().hide()
+        self.tabs.setTabsClosable(False)
         self.tabs.tabCloseRequested.connect(self.close_tab)
         self.tabs.currentChanged.connect(self._current_tab_changed)
         self.setCentralWidget(self.tabs)
+
+        tab_strip = QToolBar("Tabs", self)
+        tab_strip.setMovable(False)
+        tab_strip.setObjectName("tabStrip")
+        self.tab_strip = tab_strip
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tab_strip)
+        self.chrome_tabs = QTabBar(self)
+        self.chrome_tabs.setObjectName("chromeTabs")
+        self.chrome_tabs.setExpanding(False)
+        self.chrome_tabs.setMovable(True)
+        self.chrome_tabs.setTabsClosable(True)
+        self.chrome_tabs.setUsesScrollButtons(True)
+        self.chrome_tabs.setElideMode(Qt.TextElideMode.ElideRight)
+        self.chrome_tabs.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.chrome_tabs.currentChanged.connect(self._chrome_tab_selected)
+        self.chrome_tabs.tabMoved.connect(self._chrome_tab_moved)
+        self.chrome_tabs.tabCloseRequested.connect(self.close_tab)
+        tab_strip.addWidget(self.chrome_tabs)
+        self._button("+", "Новая вкладка (Ctrl+T)", tab_strip, self.new_tab)
+        self.tab_spacer = QWidget(self)
+        self.tab_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        tab_strip.addWidget(self.tab_spacer)
+        self.minimize_button = self._button("—", "Свернуть", tab_strip, self.showMinimized)
+        self.maximize_button = self._button("□", "Развернуть", tab_strip, self._toggle_maximize)
+        self.close_button = self._button("×", "Закрыть окно", tab_strip, self.close)
+        self.close_button.setObjectName("windowCloseButton")
+        tab_strip.installEventFilter(self)
+        self.tab_spacer.installEventFilter(self)
 
         bar = QToolBar("Navigation", self)
         bar.setMovable(False)
         bar.setObjectName("navigation")
         self.addToolBar(bar)
-        self.back_button = self._button("‹", "Back", bar, lambda: self._with_view("back"))
-        self.forward_button = self._button("›", "Forward", bar, lambda: self._with_view("forward"))
-        self.reload_button = self._button("↻", "Reload", bar, lambda: self._with_view("reload"))
+        self.back_button = self._button("←", "Назад", bar, lambda: self._with_view("back"))
+        self.forward_button = self._button("→", "Вперёд", bar, lambda: self._with_view("forward"))
+        self.reload_button = self._button("⟳", "Обновить", bar, lambda: self._with_view("reload"))
         self.address = QLineEdit(self)
-        self.address.setPlaceholderText("Search or enter an address")
+        self.address.setObjectName("address")
+        self.address.setPlaceholderText("Поиск или адрес сайта")
         self.address.setClearButtonEnabled(True)
+        self.address.setMinimumWidth(200)
+        self.address.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.address.returnPressed.connect(self.navigate)
         bar.addWidget(self.address)
-        self._button("☆", "Bookmark this page", bar, self.bookmark_current)
-        self._button("+", "New tab", bar, self.new_tab)
+        self._button("☆", "Добавить в закладки (Ctrl+D)", bar, self.bookmark_current)
+        self.menu_button = self._button("⋮", "Меню Aurora", bar, lambda: None)
+        self.menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.find_bar = QLineEdit(self)
         self.find_bar.setPlaceholderText("Find on this page")
         self.find_bar.setClearButtonEnabled(True)
@@ -108,10 +165,59 @@ class AuroraWindow(QMainWindow):
         self._install_shortcuts()
         self._install_menus()
         self._apply_theme()
+        QApplication.instance().installEventFilter(self)
         self.new_tab()
 
-    def _button(self, text: str, tooltip: str, toolbar: QToolBar, callback) -> QPushButton:
-        button = QPushButton(text, self)
+    def _toggle_maximize(self) -> None:
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "maximize_button"):
+            maximized = self.isMaximized()
+            self.maximize_button.setText("❐" if maximized else "□")
+            self.maximize_button.setToolTip("Восстановить" if maximized else "Развернуть")
+
+    def eventFilter(self, watched, event) -> bool:
+        if isinstance(watched, QWidget) and (watched is self or self.isAncestorOf(watched)):
+            event_type = event.type()
+            if event_type in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):
+                if isinstance(event, QMouseEvent) and event.button() == Qt.MouseButton.LeftButton:
+                    point = event.globalPosition().toPoint()
+                    bounds = self.frameGeometry()
+                    margin = 7
+                    edges = []
+                    if point.x() <= bounds.left() + margin:
+                        edges.append(Qt.Edge.LeftEdge)
+                    elif point.x() >= bounds.right() - margin:
+                        edges.append(Qt.Edge.RightEdge)
+                    if point.y() <= bounds.top() + margin:
+                        edges.append(Qt.Edge.TopEdge)
+                    elif point.y() >= bounds.bottom() - margin:
+                        edges.append(Qt.Edge.BottomEdge)
+                    if edges and not self.isMaximized() and event_type == QEvent.Type.MouseButtonPress:
+                        combined = edges[0]
+                        for edge in edges[1:]:
+                            combined |= edge
+                        handle = self.windowHandle()
+                        if handle is not None and handle.startSystemResize(combined):
+                            return True
+                    if watched in (self.tab_strip, self.tab_spacer):
+                        if event_type == QEvent.Type.MouseButtonDblClick:
+                            self._toggle_maximize()
+                            return True
+                        if event_type == QEvent.Type.MouseButtonPress:
+                            handle = self.windowHandle()
+                            if handle is not None and handle.startSystemMove():
+                                return True
+        return super().eventFilter(watched, event)
+
+    def _button(self, text: str, tooltip: str, toolbar: QToolBar, callback) -> QToolButton:
+        button = QToolButton(self)
+        button.setText(text)
         button.setToolTip(tooltip)
         button.setObjectName("navButton")
         button.clicked.connect(callback)
@@ -168,38 +274,57 @@ class AuroraWindow(QMainWindow):
             db.execute("CREATE TABLE IF NOT EXISTS history (url TEXT PRIMARY KEY, title TEXT NOT NULL, visited_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, visits INTEGER NOT NULL DEFAULT 1)")
 
     def _install_menus(self) -> None:
-        bookmarks_menu = self.menuBar().addMenu("Bookmarks")
-        add = bookmarks_menu.addAction("Bookmark this page")
+        self.menuBar().hide()
+        bookmarks_menu = QMenu("Закладки и списки", self)
+        add = bookmarks_menu.addAction("Добавить текущую страницу")
         add.setShortcut("Ctrl+D")
         add.triggered.connect(self.bookmark_current)
-        show = bookmarks_menu.addAction("Show bookmarks…")
+        show = bookmarks_menu.addAction("Все закладки…")
         show.triggered.connect(self.show_bookmarks)
 
-        history_menu = self.menuBar().addMenu("History")
-        show_history = history_menu.addAction("Show recent visits…")
+        history_menu = QMenu("История", self)
+        show_history = history_menu.addAction("Недавно посещённые…")
         show_history.triggered.connect(self.show_history)
-        clear_history = history_menu.addAction("Clear Aurora visit list…")
+        clear_history = history_menu.addAction("Очистить историю Aurora…")
         clear_history.triggered.connect(self.clear_history)
 
-        privacy_menu = self.menuBar().addMenu("Privacy")
-        self.tracker_action = privacy_menu.addAction("Block known tracking domains")
+        privacy_menu = QMenu("Конфиденциальность", self)
+        self.tracker_action = privacy_menu.addAction("Блокировать известные трекеры")
         self.tracker_action.setCheckable(True)
         self.tracker_action.setChecked(self.tracker_blocking_enabled)
         self.tracker_action.toggled.connect(self._set_tracker_blocking)
-        privacy_info = privacy_menu.addAction("About tracker protection…")
+        privacy_info = privacy_menu.addAction("О защите от трекеров…")
         privacy_info.triggered.connect(lambda: QMessageBox.information(
             self, "Tracker protection",
-            "Aurora blocks requests to a small built-in set of known tracking domains. "
+            "Aurora uses Brave's adblock-rust engine with a small built-in set of third-party tracking-domain rules. "
             "This list is not comprehensive and is not updated automatically. "
             "It may affect some website features. The setting applies to this app session."))
         if self.private_mode:
             bookmarks_menu.setEnabled(False)
             history_menu.setEnabled(False)
 
-        self.profiles_menu = self.menuBar().addMenu("Profiles")
+        self.profiles_menu = QMenu("Профили", self)
         self.profiles_menu.aboutToShow.connect(self._refresh_profile_menu)
         self.profiles_menu.setEnabled(not self.private_mode)
         self._refresh_profile_menu()
+
+        self.browser_menu = QMenu(self)
+        new_tab_action = self.browser_menu.addAction("Новая вкладка")
+        new_tab_action.setShortcut("Ctrl+T")
+        new_tab_action.triggered.connect(self.new_tab)
+        new_private_action = self.browser_menu.addAction("Новое окно в режиме инкогнито")
+        new_private_action.setShortcut("Ctrl+Shift+N")
+        new_private_action.triggered.connect(self.open_private_window)
+        self.browser_menu.addSeparator()
+        self.browser_menu.addMenu(bookmarks_menu)
+        self.browser_menu.addMenu(history_menu)
+        self.browser_menu.addMenu(privacy_menu)
+        self.browser_menu.addMenu(self.profiles_menu)
+        self.browser_menu.addSeparator()
+        find_action = self.browser_menu.addAction("Найти на этой странице…")
+        find_action.setShortcut("Ctrl+F")
+        find_action.triggered.connect(self.open_find_bar)
+        self.menu_button.setMenu(self.browser_menu)
 
     def _set_tracker_blocking(self, enabled: bool) -> None:
         self.tracker_blocking_enabled = enabled
@@ -370,6 +495,7 @@ class AuroraWindow(QMainWindow):
         if next_id == self.active_profile_id:
             return
         self._profile_switching = True
+        self.chrome_tabs.blockSignals(True)
         self.profiles_menu.setEnabled(False)
         self.statusBar().showMessage("Closing the current profile…")
         old_engine_profile = self.profile
@@ -396,6 +522,7 @@ class AuroraWindow(QMainWindow):
             else:
                 self.bookmark_db = None
             self.setWindowTitle(f"Aurora — {self.active_profile_name}")
+            self.chrome_tabs.blockSignals(False)
             self.new_tab()
             self._profile_switching = False
             self.profiles_menu.setEnabled(True)
@@ -409,6 +536,7 @@ class AuroraWindow(QMainWindow):
             tab = self.tabs.widget(index)
             if isinstance(tab, BrowserTab):
                 tab.view.stop()
+            self.chrome_tabs.removeTab(index)
             self.tabs.removeTab(index)
             if tab is not None:
                 if count:
@@ -420,23 +548,67 @@ class AuroraWindow(QMainWindow):
 
     def _apply_theme(self) -> None:
         self.setStyleSheet("""
-            QMainWindow { background: #10131b; }
-            QToolBar#navigation { background: rgba(29, 34, 47, 238); border: 0; spacing: 8px;
-                padding: 10px 14px; }
-            QLineEdit { background: rgba(255,255,255,0.10); color: #f5f7ff; border: 1px solid rgba(255,255,255,0.12);
-                border-radius: 18px; padding: 10px 16px; selection-background-color: #7389ff; }
-            QPushButton#navButton { color: #edf0ff; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 17px; min-width: 34px; min-height: 34px; font-size: 17px; }
-            QPushButton#navButton:hover { background: rgba(132,153,255,0.25); }
-            QTabWidget::pane { border: 0; background: #10131b; }
-            QTabBar { background: #171b26; }
-            QTabBar::tab { color: #c5cad9; background: #202534; border-radius: 10px; padding: 8px 16px; margin: 5px 3px; min-width: 110px; }
-            QTabBar::tab:selected { color: white; background: #343c53; }
+            QMainWindow { background: #35363a; color: #f3f1fa; }
+            QMenuBar { background: #171720; color: #aaa8b8; border: 0; padding: 3px 8px; }
+            QMenuBar::item { background: transparent; padding: 7px 11px; border-radius: 7px; }
+            QMenuBar::item:selected { color: #f6f3ff; background: #ffffff12; }
+            QMenu { background: #292a2d; color: #f0eef8; border: 1px solid #ffffff1c; padding: 6px; }
+            QMenu::item { padding: 8px 28px 8px 12px; border-radius: 6px; }
+            QMenu::item:selected { background: #4b4c50; color: white; }
+            QMenu::separator { height: 1px; background: #ffffff19; margin: 5px 8px; }
+            QToolBar#tabStrip { background: #202124; border: 0; spacing: 3px; padding: 0 7px; min-height: 42px; }
+            QToolBar#navigation { background: #35363a; border: 0; spacing: 7px; padding: 7px 12px 10px; }
+            QToolBar#navigation::separator { width: 1px; background: #ffffff1c; margin: 6px 7px; }
+            QLabel#brand { color: #e8e4f5; font-size: 12px; font-weight: 700; letter-spacing: 1px; padding: 0 8px 0 1px; }
+            QLineEdit { background: #292a2d; color: #f5f3fb; border: 1px solid #ffffff18;
+                border-radius: 13px; padding: 9px 14px; selection-background-color: #8971dc; }
+            QLineEdit#address { min-height: 22px; border-radius: 19px; padding: 10px 17px; font-size: 13px; }
+            QLineEdit#address:focus { border: 1px solid #a9c7ff; background: #292a2d; }
+            QToolButton#navButton { color: #cfccda; background: transparent; border: 1px solid transparent;
+                border-radius: 12px; min-width: 36px; min-height: 36px; font-size: 18px; }
+            QToolButton#navButton:hover { color: white; background: #ffffff12; border-color: #ffffff12; }
+            QToolButton#navButton:disabled { color: #5d5b68; }
+            QToolBar#tabStrip QToolButton#navButton { min-width: 30px; max-width: 38px; min-height: 30px;
+                max-height: 34px; border-radius: 8px; color: #c9cace; }
+            QToolBar#tabStrip QToolButton#windowCloseButton:hover { color: white; background: #c42b1c; }
+            QToolBar#navigation QToolButton#navButton { min-width: 30px; max-width: 38px; }
+            QToolButton::menu-indicator { image: none; }
+            QTabWidget::pane { border: 0; background: #35363a; }
+            QTabBar#chromeTabs { background: transparent; qproperty-drawBase: 0; }
+            QTabBar#chromeTabs::tab { color: #c2c3c7; background: #2b2c30; border: 0;
+                border-radius: 9px 9px 0 0; padding: 8px 13px; margin: 5px 2px 0; min-width: 170px; max-width: 240px; }
+            QTabBar#chromeTabs::tab:hover { color: #f0f0f2; background: #35363a; }
+            QTabBar#chromeTabs::tab:selected { color: #f4f4f5; background: #35363a; }
+            QStatusBar { background: #292a2d; color: #b8b9bd; border-top: 1px solid #ffffff0c; font-size: 11px; }
+            QStatusBar::item { border: 0; }
+            QToolTip { color: #f5f3fa; background: #282733; border: 1px solid #ffffff24; padding: 5px 8px; }
+            QDialog, QMessageBox, QInputDialog { background: #1b1a24; color: #f0eef8; }
+            QPushButton { background: #2b2936; color: #e9e6f2; border: 1px solid #ffffff18;
+                border-radius: 9px; padding: 8px 14px; }
+            QPushButton:hover { background: #393646; border-color: #ffffff30; }
+            QPushButton:default { background: #8971dc; color: white; border-color: #a28bec; }
+            QListWidget { background: #22212c; color: #e9e7f0; border: 1px solid #ffffff18; border-radius: 10px; padding: 5px; }
+            QListWidget::item { padding: 8px; border-radius: 6px; }
+            QListWidget::item:selected { background: #8971dc55; }
         """)
 
     def current_tab(self) -> BrowserTab | None:
         tab = self.tabs.currentWidget()
         return tab if isinstance(tab, BrowserTab) else None
+
+    def _chrome_tab_selected(self, index: int) -> None:
+        if index >= 0 and index != self.tabs.currentIndex():
+            self.tabs.setCurrentIndex(index)
+
+    def _chrome_tab_moved(self, source: int, destination: int) -> None:
+        tab = self.tabs.widget(source)
+        title = self.tabs.tabText(source)
+        self.tabs.blockSignals(True)
+        self.tabs.removeTab(source)
+        self.tabs.insertTab(destination, tab, title)
+        self.tabs.setCurrentIndex(self.chrome_tabs.currentIndex())
+        self.tabs.blockSignals(False)
+        self._current_tab_changed(self.tabs.currentIndex())
 
     def _with_view(self, method: str) -> None:
         tab = self.current_tab()
@@ -446,12 +618,15 @@ class AuroraWindow(QMainWindow):
     def new_tab(self, address: str = "") -> None:
         tab = BrowserTab(self.profile, address)
         tab.view.titleChanged.connect(lambda title, page=tab: self._title_changed(page, title))
+        tab.view.iconChanged.connect(lambda icon, page=tab: self._icon_changed(page, icon))
         tab.view.urlChanged.connect(lambda url, page=tab: self._url_changed(page, url))
         tab.view.loadFinished.connect(lambda ok, page=tab: self._page_loaded(page, ok))
         tab.page.permissionRequested.connect(self._handle_permission_request)
         tab.view.loadProgress.connect(lambda progress: self.statusBar().showMessage(f"Loading… {progress}%", 1500))
-        index = self.tabs.addTab(tab, "New Tab")
+        index = self.tabs.addTab(tab, "Новая вкладка")
+        self.chrome_tabs.addTab("Новая вкладка")
         self.tabs.setCurrentIndex(index)
+        self.chrome_tabs.setCurrentIndex(index)
         self.address.setFocus()
 
     def _handle_permission_request(self, permission: QWebEnginePermission) -> None:
@@ -489,6 +664,7 @@ class AuroraWindow(QMainWindow):
         if self.tabs.count() <= 1:
             self.new_tab()
         widget = self.tabs.widget(index)
+        self.chrome_tabs.removeTab(index)
         self.tabs.removeTab(index)
         if widget:
             widget.deleteLater()
@@ -510,9 +686,15 @@ class AuroraWindow(QMainWindow):
         index = self.tabs.indexOf(tab)
         if index >= 0:
             short = title[:24] + ("…" if len(title) > 24 else "")
-            self.tabs.setTabText(index, short or "New Tab")
+            self.tabs.setTabText(index, short or "Новая вкладка")
+            self.chrome_tabs.setTabText(index, short or "Новая вкладка")
             if index == self.tabs.currentIndex():
-                self.setWindowTitle(f"{title or 'New Tab'} — Aurora")
+                self.setWindowTitle(f"{title or 'Новая вкладка'} — Aurora")
+
+    def _icon_changed(self, tab: BrowserTab, icon) -> None:
+        index = self.tabs.indexOf(tab)
+        if index >= 0:
+            self.chrome_tabs.setTabIcon(index, icon)
 
     def _url_changed(self, tab: BrowserTab, url: QUrl) -> None:
         if tab is self.current_tab():
@@ -521,11 +703,13 @@ class AuroraWindow(QMainWindow):
         self.forward_button.setEnabled(tab.view.history().canGoForward())
 
     def _current_tab_changed(self, _index: int) -> None:
+        if _index >= 0 and self.chrome_tabs.currentIndex() != _index:
+            self.chrome_tabs.setCurrentIndex(_index)
         tab = self.current_tab()
         if tab:
             url = tab.view.url()
             self.address.setText(url.toString() if url.scheme() != "about" else "")
-            self.setWindowTitle(f"{tab.view.title() or 'New Tab'} — Aurora")
+            self.setWindowTitle(f"{tab.view.title() or 'Новая вкладка'} — Aurora")
             self.back_button.setEnabled(tab.view.history().canGoBack())
             self.forward_button.setEnabled(tab.view.history().canGoForward())
 

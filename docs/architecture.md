@@ -18,6 +18,12 @@ Qt WebEngine is cross-platform across Windows, macOS, and Linux. Current Qt API 
 - **A maintained Chromium fork:** gives the greatest control over browser behavior and extension parity, but requires a large ongoing Chromium merge, build, and security response operation. That infrastructure is absent, so it is not appropriate for the initial executable milestone.
 - **Microsoft WebView2:** immediately available on this Windows machine and Chromium-based, but Windows-specific, and not a good cross-platform foundation for the stated scope.
 
+## Browser source projects consulted
+
+- **Brave adblock-rust** is integrated as a dependency through the community Python bindings (`adblock==0.6.0`). Aurora expresses its existing bundled tracker host set as standard ABP rules and passes Chromium request URLs, first-party URLs, and resource types to this engine. The Rust engine is MPL-2.0; the Python bindings are MIT OR Apache-2.0. See `docs/third-party-sources.md` for links and scope. The Python bindings are an older release, so upgrading them and validating the Windows package is required before shipping broadly.
+- **qutebrowser** is a Python/Qt WebEngine browser consulted as an architectural reference for keeping browser behavior in the Qt integration layer. No qutebrowser source code was copied; its GPL-3.0-or-later license is therefore not added to Aurora by this work.
+- **Chromium** is the embedded browser engine supplied by Qt WebEngine. Aurora does not contain or build the Chromium source tree itself.
+
 ## Consequences
 
 - We can ship a cross-platform UI and embedded Chromium without maintaining a Chromium fork.

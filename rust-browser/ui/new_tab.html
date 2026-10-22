@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Новая вкладка — Aurora</title>
+  <style>
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#10131b;color:#f5f6fb}
+    body{font:15px/1.5 "Segoe UI",system-ui,sans-serif;background:radial-gradient(ellipse 75% 52% at 50% 8%,#4e74b53b,transparent 72%),radial-gradient(ellipse 42% 30% at 85% 65%,#aa7df51c,transparent 76%),#10131b}
+    main{min-height:calc(100vh - 104px);display:flex;flex-direction:column;align-items:center;padding:clamp(58px,12vh,126px) 24px 38px}
+    .mark{width:82px;height:82px;display:block;filter:drop-shadow(0 16px 28px #05081685)}.mark svg{display:block;width:100%;height:100%}
+    h1{margin:20px 0 0;font-size:34px;letter-spacing:.22em;font-weight:600}p{margin:5px 0 0;color:#aeb7ca}
+    form{width:min(650px,100%);height:62px;display:flex;align-items:center;gap:12px;margin:34px 0 42px;padding:7px 8px 7px 20px;border:1px solid #ffffff24;border-radius:32px;background:#ffffff12;box-shadow:0 12px 36px #0003,inset 0 1px #ffffff1c;backdrop-filter:blur(28px);transition:.2s}
+    form:focus-within{border-color:#a9c7ff9c;background:#ffffff18;box-shadow:0 0 0 3px #91baff22,0 12px 36px #0003}
+    form span{font-size:22px;color:#bcc9e3}input{min-width:0;flex:1;border:0;outline:0;background:transparent;color:#f6f7fb;font:inherit}input::placeholder{color:#a6aec0}
+    button{height:44px;padding:0 19px;border:1px solid #ffffff20;border-radius:24px;background:#dce8ff;color:#182033;font:600 13px "Segoe UI",sans-serif;cursor:pointer;box-shadow:inset 0 1px #fff8}button:hover{background:#fff}
+    .section{width:min(650px,100%)}.section-title{margin:0 0 14px 5px;color:#aab4c9;font-size:11px;font-weight:650;letter-spacing:.15em;text-transform:uppercase}
+    .shortcuts{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.shortcut{display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 8px;border:1px solid #ffffff12;border-radius:22px;background:#ffffff09;color:#eef1f9;text-decoration:none;backdrop-filter:blur(20px);transition:transform .18s,background .18s,border-color .18s}
+    .shortcut:hover{transform:translateY(-3px);background:#ffffff17;border-color:#ffffff30}.icon{width:48px;height:48px;display:grid;place-items:center;border:1px solid #ffffff20;border-radius:17px;background:linear-gradient(145deg,#ffffff25,#ffffff09);font-size:19px;font-weight:650;color:#e2eaff}.label{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+    footer{margin-top:auto;padding-top:54px;color:#778198;font-size:12px}
+    @media(max-width:560px){.shortcuts{grid-template-columns:repeat(2,1fr)}main{padding-top:9vh}h1{font-size:29px}}
+    html.light,html.light body{background:radial-gradient(ellipse 75% 52% at 50% 8%,#88a7dd45,transparent 72%),#eaf0f9;color:#1d2638}
+    html.light body>main>p,html.light .section-title,html.light footer{color:#6c7990}
+    html.light form,html.light .shortcut{background:#ffffff9c;border-color:#ffffffc7;box-shadow:0 12px 36px #24365112,inset 0 1px #fff}
+    html.light input{color:#1d2638}html.light input::placeholder{color:#79869b}
+    html.light .shortcut{color:#293750}html.light .icon{background:linear-gradient(145deg,#fff,#e1e9f6);color:#435b83;border-color:#d5deec}
+  </style>
+</head>
+<body><main>
+  <div class="mark">{{AURORA_LOGO}}</div><h1>AURORA</h1><p>Всё начинается с поиска</p>
+  <form action="https://search.aurora.invalid/" method="get"><span>⌕</span><input name="q" autofocus autocomplete="off" placeholder="Поиск в интернете или адрес сайта" aria-label="Поиск в интернете"><button type="submit">Найти</button></form>
+  <section class="section"><div class="section-title">Быстрый доступ</div><div class="shortcuts">
+    <a class="shortcut" href="https://wikipedia.org"><span class="icon">W</span><span class="label">Wikipedia</span></a>
+    <a class="shortcut" href="https://youtube.com"><span class="icon">▶</span><span class="label">YouTube</span></a>
+    <a class="shortcut" href="https://github.com"><span class="icon">⌘</span><span class="label">GitHub</span></a>
+    <a class="shortcut" href="https://duckduckgo.com"><span class="icon">⌕</span><span class="label">DuckDuckGo</span></a>
+  </div></section><footer>Aurora · ваш браузер</footer>
+</main></body></html>
