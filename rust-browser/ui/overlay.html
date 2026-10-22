@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{color-scheme:dark;--text:#f3f5fa;--muted:#aab5ca;--line:#ffffff18;--surface:#ffffff0b;--hover:#ffffff12;--accent:#a9c4ff;--card:#1b2230f5}
+  *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;background:transparent;color:var(--text);font:13px/1.45 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+  button,select{font:inherit;color:inherit}button{cursor:pointer}
+  .scrim{position:fixed;inset:0;opacity:0;visibility:hidden;transition:opacity .19s ease,visibility .19s;pointer-events:none;background:#080b1290}
+  .scrim.open{opacity:1;visibility:visible;pointer-events:auto}
+  .card{position:absolute;top:98px;right:12px;width:min(360px,calc(100vw - 24px));max-height:calc(100vh - 112px);overflow:auto;padding:12px;border:1px solid #ffffff2b;border-radius:24px;background:linear-gradient(150deg,#293247f5,var(--card));box-shadow:0 25px 70px #0008,inset 0 1px #ffffff30;backdrop-filter:blur(34px) saturate(145%);transform:translateY(-9px) scale(.98);opacity:0;transition:transform .22s cubic-bezier(.2,.8,.2,1),opacity .18s ease}
+  .open .card{transform:translateY(0) scale(1);opacity:1}
+  .card.settings-mode{top:50%;right:auto;left:50%;width:min(780px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 40px));overflow:hidden;transform:translate(-50%,-47%) scale(.98)}
+  .open .card.settings-mode{transform:translate(-50%,-50%) scale(1)}
+  .head{display:flex;align-items:center;justify-content:space-between;padding:7px 8px 13px;font-size:15px;font-weight:650;letter-spacing:.01em}
+  .head-copy{display:grid;gap:3px}.head-copy small{font-size:12px;color:var(--muted);font-weight:400}
+  .head button{width:32px;height:32px;border:1px solid var(--line);border-radius:50%;background:var(--surface);font-size:18px;line-height:1}
+  .head button:hover,.back:hover{background:var(--hover)}
+  .section-title{padding:10px 10px 5px;color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+  .list{display:flex;flex-direction:column;gap:2px}.item,.action{width:100%;min-height:38px;padding:9px 11px;border:1px solid transparent;border-radius:13px;background:transparent;text-align:left;text-overflow:ellipsis;overflow:hidden;white-space:nowrap}
+  .item:hover,.action:hover,.setting:hover{background:var(--hover);border-color:#ffffff10}.empty{padding:8px 11px;color:var(--muted);font-size:12px}
+  .divider{height:1px;margin:8px 5px;background:var(--line)}
+  .settings-head{display:flex;align-items:center;gap:12px;padding:5px 6px 17px;border-bottom:1px solid var(--line)}
+  .back{width:36px;height:36px;border:1px solid var(--line);border-radius:12px;background:var(--surface);font-size:19px}
+  .settings-head h1{margin:0;font-size:20px;font-weight:650;letter-spacing:-.02em}.settings-head p{margin:3px 0 0;color:var(--muted);font-size:12px}
+  .settings-layout{display:grid;grid-template-columns:190px minmax(0,1fr);gap:20px;padding-top:16px;min-height:370px}
+  .settings-nav{display:flex;flex-direction:column;gap:5px;padding-right:14px;border-right:1px solid var(--line)}
+  .nav-item{display:flex;align-items:center;gap:11px;width:100%;padding:11px 12px;border:1px solid transparent;border-radius:13px;background:transparent;text-align:left;color:var(--muted);transition:background .16s,color .16s,border-color .16s}
+  .nav-item:hover{background:var(--hover);color:var(--text)}.nav-item.active{background:#a9c4ff1a;border-color:#a9c4ff20;color:#dce7ff}
+  .nav-icon{width:22px;text-align:center;font-size:16px}.settings-content{min-width:0;overflow:auto;padding:0 4px 14px 0}
+  .pane-title{margin:0 0 4px;font-size:16px;font-weight:650}.pane-description{margin:0 0 18px;color:var(--muted);font-size:12px}
+  .setting{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:68px;padding:12px 13px;border:1px solid transparent;border-bottom-color:var(--line);border-radius:13px;color:var(--text);transition:background .16s,border-color .16s}
+  .setting-copy{display:grid;gap:3px}.setting-copy span{font-weight:550}.setting-copy small{color:var(--muted);font-size:11px}
+  .setting select{min-width:150px;max-width:190px;padding:9px 30px 9px 11px;border:1px solid var(--line);border-radius:11px;background:#222a38;outline:0}
+  .setting select:focus-visible,.head button:focus-visible,.back:focus-visible,.nav-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .switch{position:relative;flex:0 0 42px;width:42px;height:24px}.switch input{position:absolute;width:1px;height:1px;opacity:0}.switch-track{position:absolute;inset:0;border:1px solid #ffffff28;border-radius:20px;background:#ffffff18;transition:background .18s,border-color .18s}.switch-track:after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#c4ccda;transition:transform .18s,background .18s}.switch input:checked+.switch-track{background:#7598e7;border-color:#9bb7ff}.switch input:checked+.switch-track:after{transform:translateX(18px);background:#fff}.switch input:focus-visible+.switch-track{outline:2px solid var(--accent);outline-offset:3px}
+  .save-note{display:flex;align-items:center;gap:8px;margin-top:17px;padding:11px 13px;border:1px solid #82c69b26;border-radius:12px;background:#6abf8b0d;color:#b8d9c2;font-size:11px}.save-dot{width:7px;height:7px;border-radius:50%;background:#77d599;box-shadow:0 0 10px #77d59980}
+  html.no-motion *,html.no-motion *::before,html.no-motion *::after{transition:none!important;animation:none!important}
+  html.light{color-scheme:light;--text:#1d2638;--muted:#68758a;--line:#18284718;--surface:#18284708;--hover:#1828470c;--accent:#476fc6;--card:#f2f6ff}
+  html.light .scrim{background:#24314b42}html.light .card{background:linear-gradient(150deg,#fbfcffff,var(--card));border-color:#fff;box-shadow:0 25px 70px #26375438,inset 0 1px #fff}
+  html.light .nav-item.active{background:#466fc51a;border-color:#466fc520;color:#294b91}html.light .setting select{background:#fff;color:var(--text);border-color:#16284920}
+  html.light .save-note{background:#2999580b;border-color:#29995827;color:#28633f}html.light .save-dot{background:#35a761}
+  @media(max-width:560px){.card.settings-mode{padding:10px}.settings-layout{grid-template-columns:1fr;gap:10px;min-height:0}.settings-nav{flex-direction:row;padding:0 0 10px;border-right:0;border-bottom:1px solid var(--line)}.nav-item{justify-content:center;padding:9px 7px}.nav-icon{width:auto}.settings-content{max-height:calc(100vh - 230px)}.setting{gap:8px}.setting select{min-width:120px;max-width:145px}}
+</style>
+</head>
+<body>
+  <div class="scrim" id="scrim">
+    <section class="card" id="menu-card" aria-label="Меню Aurora">
+      <div id="menu-view">
+        <div class="head"><span>Библиотека</span><button onclick="closeOverlay()" aria-label="Закрыть">×</button></div>
+        <div class="section-title">Закладки</div><div class="list" id="bookmarks"></div>
+        <div class="section-title">Недавно посещённые</div><div class="list" id="history"></div>
+        <div class="divider"></div>
+        <button class="action" onclick="send('open_downloads');closeOverlay()">↓　Открыть папку загрузок</button>
+        <button class="action" onclick="send('clear_history');closeOverlay()">⌫　Очистить историю</button>
+        <button class="action" onclick="showSettings()">⚙　Настройки</button>
+      </div>
+      <div id="settings-view" hidden>
+        <div class="settings-head">
+          <button class="back" onclick="showMenu()" aria-label="Назад к библиотеке">‹</button>
+          <div><h1>Настройки</h1><p>Настройте Aurora под себя</p></div>
+          <button style="margin-left:auto" onclick="closeOverlay()" aria-label="Закрыть настройки">×</button>
+        </div>
+        <div class="settings-layout">
+          <nav class="settings-nav" aria-label="Разделы настроек">
+            <button class="nav-item active" data-pane="general"><span class="nav-icon">⚙</span><span>Основные</span></button>
+            <button class="nav-item" data-pane="appearance"><span class="nav-icon">◐</span><span>Внешний вид</span></button>
+          </nav>
+          <div class="settings-content">
+            <section class="settings-pane" data-content="general">
+              <h2 class="pane-title">Основные</h2><p class="pane-description">Поиск и поведение новых вкладок.</p>
+              <label class="setting"><span class="setting-copy"><span>Поисковая система</span><small>Используется для запросов из адресной строки</small></span><select id="engine"><option value="duckduckgo">DuckDuckGo</option><option value="google">Google</option></select></label>
+              <label class="setting"><span class="setting-copy"><span>При открытии новой вкладки</span><small>Выберите, что показывать на стартовой странице</small></span><select id="homepage"><option value="aurora">Страница Aurora</option><option value="duckduckgo">Поиск DuckDuckGo</option></select></label>
+            </section>
+            <section class="settings-pane" data-content="appearance" hidden>
+              <h2 class="pane-title">Внешний вид</h2><p class="pane-description">Выберите оформление и поведение анимаций.</p>
+              <label class="setting"><span class="setting-copy"><span>Цветовая тема</span><small>Применяется к интерфейсу браузера</small></span><select id="theme"><option value="dark">Тёмная</option><option value="light">Светлая</option></select></label>
+              <label class="setting"><span class="setting-copy"><span>Плавные анимации</span><small>Анимация открытия меню и вкладок</small></span><span class="switch"><input id="animations" type="checkbox"><span class="switch-track"></span></span></label>
+            </section>
+            <div class="save-note"><span class="save-dot"></span><span>Изменения сохраняются автоматически на этом компьютере</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+<script>
+  const scrim=document.querySelector('#scrim'),card=document.querySelector('#menu-card');
+  function send(action,value){window.ipc.postMessage(JSON.stringify({action,value}));}
+  function closeOverlay(){scrim.classList.remove('open');}
+  function showSettings(){document.querySelector('#menu-view').hidden=true;document.querySelector('#settings-view').hidden=false;card.classList.add('settings-mode');selectPane('general');}
+  function showMenu(){document.querySelector('#settings-view').hidden=true;document.querySelector('#menu-view').hidden=false;card.classList.remove('settings-mode');}
+  function selectPane(name){document.querySelectorAll('.nav-item').forEach(button=>button.classList.toggle('active',button.dataset.pane===name));document.querySelectorAll('.settings-pane').forEach(pane=>pane.hidden=pane.dataset.content!==name);}
+  function fill(target,items){const root=document.querySelector(target);root.replaceChildren();if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent=target==='#bookmarks'?'Пока нет сохранённых страниц':'История пока пуста';root.append(empty);return;}for(const item of items.slice(0,10)){const button=document.createElement('button');button.className='item';button.textContent=item.title||item.url;button.title=item.url;button.onclick=()=>{send('open_url',item.url);closeOverlay();};root.append(button);}}
+  window.setData=(bookmarks,history,settings)=>{fill('#bookmarks',bookmarks);fill('#history',history);document.querySelector('#engine').value=settings.search_engine||'duckduckgo';document.querySelector('#homepage').value=settings.homepage||'aurora';document.querySelector('#theme').value=settings.theme||'dark';document.querySelector('#animations').checked=settings.animations!==false;document.documentElement.classList.toggle('no-motion',settings.animations===false);document.documentElement.classList.toggle('light',settings.theme==='light');};
+  window.setOpen=open=>{if(open){showMenu();scrim.classList.add('open');}else closeOverlay();};
+  scrim.addEventListener('pointerdown',e=>{if(e.target===scrim)closeOverlay();});
+  scrim.addEventListener('transitionend',e=>{if(e.target===scrim&&e.propertyName==='opacity'&&!scrim.classList.contains('open'))send('overlay_hidden');});
+  document.querySelectorAll('.nav-item').forEach(button=>button.onclick=()=>selectPane(button.dataset.pane));
+  document.querySelector('#engine').onchange=e=>send('settings_update','search_engine='+e.target.value);
+  document.querySelector('#homepage').onchange=e=>send('settings_update','homepage='+e.target.value);
+  document.querySelector('#theme').onchange=e=>send('settings_update','theme='+e.target.value);
+  document.querySelector('#animations').onchange=e=>send('settings_update','animations='+e.target.checked);
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeOverlay();});
+</script>
+</body></html>

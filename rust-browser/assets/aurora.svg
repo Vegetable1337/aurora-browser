@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="12" y1="8" x2="116" y2="124" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#263D72"/><stop offset=".52" stop-color="#202B55"/><stop offset="1" stop-color="#171B35"/>
+    </linearGradient>
+    <linearGradient id="aurora" x1="30" y1="90" x2="97" y2="33" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#70E7E1"/><stop offset=".52" stop-color="#A9CBFF"/><stop offset="1" stop-color="#D8B5FF"/>
+    </linearGradient>
+    <linearGradient id="inner" x1="44" y1="95" x2="84" y2="43" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#91FFF0"/><stop offset="1" stop-color="#F2E7FF"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="matrix(0 77 -77 0 63 34)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#78BFFF" stop-opacity=".4"/><stop offset="1" stop-color="#7A8FFF" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="9" y="11" width="110" height="109" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+  </defs>
+  <rect x="3" y="3" width="122" height="122" rx="34" fill="url(#bg)"/>
+  <rect x="3.5" y="3.5" width="121" height="121" rx="33.5" stroke="#DCE8FF" stroke-opacity=".18"/>
+  <path d="M15 96C39 72 39 39 65 25c20 16 20 39 48 65" stroke="#8BD6FF" stroke-opacity=".72" stroke-width="21" stroke-linecap="round" filter="url(#soft)"/>
+  <path d="M15 96C39 72 39 39 65 25c20 16 20 39 48 65" stroke="url(#glow)" stroke-width="24" stroke-linecap="round"/>
+  <path d="M24 94C44 72 45 48 64 35c15 15 17 37 40 57" stroke="url(#aurora)" stroke-width="13" stroke-linecap="round"/>
+  <path d="M37 97c13-16 13-34 27-44 11 13 13 29 28 43" stroke="url(#inner)" stroke-width="6" stroke-linecap="round"/>
+  <path d="M99 18v15M91.5 25.5h15" stroke="#F3F2FF" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="99" cy="25.5" r="9" fill="url(#glow)"/>
+</svg>
