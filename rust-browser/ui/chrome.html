@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    :root{color-scheme:dark;font:13px "Segoe UI",Arial,sans-serif;background:#11151f;color:#f2f4fa}
+    :root{color-scheme:dark;font:13px/1.4 "Segoe UI Variable","Segoe UI",Arial,sans-serif;background:#10141d;color:#eef2f9;--chrome:#171c27;--raised:#202735;--line:#ffffff14;--accent:#9bbcff;--ease:cubic-bezier(.2,.75,.25,1)}
     *{box-sizing:border-box}
-    body{margin:0;background:radial-gradient(ellipse 60% 50% at 45% -10%,#536fa42b,transparent 75%),#11151f;overflow:hidden}
-    .tabs{height:40px;display:flex;align-items:end;padding:6px 8px 0;background:#171d28;gap:3px;user-select:none}
+    body{margin:0;background:var(--chrome);overflow:hidden}
+    .tabs{height:40px;display:flex;align-items:end;padding:5px 8px 0;background:var(--chrome);gap:4px;user-select:none}
     #tab-list{display:flex;align-items:end;gap:2px;flex:0 1 auto;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
     #tab-list::-webkit-scrollbar{display:none}
     .tab{height:32px;width:230px;max-width:32vw;background:#ffffff09;border:1px solid #ffffff08;border-bottom:0;border-radius:14px 14px 0 0;display:flex;align-items:center;padding:0 11px;gap:9px;color:#abb4c7;cursor:pointer;transition:background .22s ease,border-color .22s ease,transform .24s cubic-bezier(.2,.8,.2,1),opacity .24s ease,filter .24s ease;animation:tab-appear .24s cubic-bezier(.2,.8,.2,1)}
-    .tab.active{position:relative;z-index:1;background:#252d3b;border-color:#ffffff16;color:#f4f6fb;box-shadow:inset 0 1px #ffffff20}
+    .tab:hover{background:#ffffff12;color:#f2f5fb}.tab.active{position:relative;z-index:1;background:var(--raised);border-color:var(--line);color:#f4f6fb;box-shadow:inset 0 1px #ffffff1a}
     .tab.closing{opacity:0;transform:translateY(5px) scale(.92);filter:blur(4px)}
     .favicon{width:17px;height:17px;border-radius:7px;background:linear-gradient(145deg,#dce7ff,#94a9d5);color:#1b2437;font-size:10px;font-weight:700;display:grid;place-items:center}
     .favicon.private{background:linear-gradient(145deg,#cbd3e0,#8e9aac);font-size:12px}
@@ -23,11 +23,11 @@
     .win{width:46px;height:34px;border:0;background:transparent;color:#bdc1c6;font-size:14px;cursor:pointer;transition:background .16s,color .16s}
     .win:hover,.newtab:hover,.close:hover{background:#ffffff20}
     .win:last-child:hover{background:#e74747;color:#fff}
-    .nav{height:64px;position:relative;display:flex;align-items:center;padding:0 12px;gap:8px;background:#171d28;border-bottom:1px solid #ffffff12;box-shadow:0 8px 25px #0002}
+    .nav{height:64px;position:relative;display:flex;align-items:center;padding:0 14px;gap:8px;background:var(--raised);border-bottom:1px solid var(--line);box-shadow:0 5px 18px #0002}
     .icon{width:34px;height:34px;border:1px solid transparent;border-radius:50%;background:transparent;color:#bbc5d8;font-size:20px;display:grid;place-items:center;cursor:pointer;transition:.16s}
     .icon:hover,.icon[aria-expanded="true"]{background:#ffffff14;border-color:#ffffff12;color:#fff}
-    .address{height:42px;border-radius:24px;background:#ffffff0b;border:1px solid #ffffff17;display:flex;align-items:center;flex:1;padding:0 15px;gap:10px;box-shadow:inset 0 1px #ffffff0b;backdrop-filter:blur(24px)}
-    .address:focus-within{background:#ffffff10;border-color:#b7ccff9e;box-shadow:0 0 0 3px #93b4ff22,inset 0 1px #ffffff14}
+    .address{height:42px;border-radius:22px;background:#111722;border:1px solid #ffffff16;display:flex;align-items:center;flex:1;padding:0 16px;gap:11px;box-shadow:inset 0 1px #ffffff0a;transition:border-color .18s,box-shadow .18s,background .18s}
+    .address:focus-within{background:#121a27;border-color:#9bbcffbd;box-shadow:0 0 0 3px #93b4ff20,inset 0 1px #ffffff12}
     .lock{color:#aebbd3;font-size:13px}
     input{width:100%;border:0;outline:0;background:transparent;color:#f2f4fa;font:14px "Segoe UI",Arial,sans-serif}
     .menu-wrap{position:relative}
@@ -53,6 +53,8 @@
     html.light .win,html.light .newtab{color:#43526a}html.light .newtab{background:#ffffff99;border-color:#16284913}
     html.light .win:last-child:hover{background:#e74747;color:#fff}
     html.light .toast{background:#f5f8ffed;border-color:#ffffff;color:#26324a}
+    button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
   </style>
 </head>
 <body>

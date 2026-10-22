@@ -23,6 +23,7 @@ struct BrowserCommand {
 
 enum UserEvent {
     Command(BrowserCommand),
+    StartupTimeout,
     PageTitle(u64, String),
     PageLoading(u64, bool),
     PageLoaded(u64, String),
@@ -36,6 +37,7 @@ struct BrowserTab {
     title: String,
     url: String,
     is_loading: bool,
+    first_load_complete: bool,
     is_private: bool,
     view: WebView,
 }
@@ -179,6 +181,7 @@ impl AuroraApp {
             title: "Новая вкладка".into(),
             url: target_url.into(),
             is_loading: true,
+            first_load_complete: false,
             is_private,
             view,
         });
@@ -191,24 +194,19 @@ impl AuroraApp {
         }
         self.active_tab = Some(id);
         for tab in &self.tabs {
-            let _ = tab.view.set_visible(tab.id == id);
+            let _ = tab
+                .view
+                .set_visible(self.layout_ready && tab.id == id && tab.first_load_complete);
         }
         self.refresh_chrome();
     }
 
-    fn close_tab(&mut self, id: u64) {
+    fn close_tab(&mut self, event_loop: &ActiveEventLoop, id: u64) {
         let Some(index) = self.tabs.iter().position(|tab| tab.id == id) else {
             return;
         };
         if self.tabs.len() == 1 {
-            let page = new_tab_html(&self.settings);
-            if let Some(tab) = self.tabs.first_mut() {
-                tab.title = "Новая вкладка".into();
-                tab.url = HOME_PAGE.into();
-                tab.is_loading = true;
-                let _ = tab.view.load_html(&page);
-            }
-            self.refresh_chrome();
+            event_loop.exit();
             return;
         }
         self.tabs.remove(index);
@@ -445,6 +443,8 @@ impl AuroraApp {
 #[derive(Default)]
 struct AuroraApp {
     window: Option<Window>,
+    window_shown: bool,
+    layout_ready: bool,
     chrome: Option<WebView>,
     tabs: Vec<BrowserTab>,
     active_tab: Option<u64>,
@@ -472,6 +472,7 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
 
         let attributes = Window::default_attributes()
             .with_title("Aurora")
+            .with_visible(false)
             .with_window_icon(Some(browser_icon()))
             .with_decorations(false)
             .with_inner_size(LogicalSize::new(1440.0, 900.0))
@@ -492,7 +493,7 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
             .with_focused(true)
             .with_bounds(Rect {
                 position: LogicalPosition::new(0, 0).into(),
-                size: LogicalSize::new(size.width, CHROME_HEIGHT).into(),
+                size: LogicalSize::new(size.width, size.height).into(),
             })
             .with_ipc_handler(move |request| {
                 match serde_json::from_str::<BrowserCommand>(request.body()) {
@@ -545,10 +546,23 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
         self.window = Some(window);
         self.context = Some(context);
         self.create_tab(HOME_PAGE);
+        let timeout_proxy = self.proxy.as_ref().expect("event loop proxy").clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(12));
+            let _ = timeout_proxy.send_event(UserEvent::StartupTimeout);
+        });
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
+            UserEvent::StartupTimeout => {
+                if !self.window_shown {
+                    if let Some(window) = self.window.as_ref() {
+                        window.set_visible(true);
+                        self.window_shown = true;
+                    }
+                }
+            }
             UserEvent::MenuOpen(open) => {
                 if open {
                     self.open_overlay();
@@ -861,7 +875,7 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                 }
                 "close_tab" => {
                     if let Some(id) = command.tab_id.or(self.active_tab) {
-                        self.close_tab(id);
+                        self.close_tab(event_loop, id);
                     }
                 }
                 "drag" => {
@@ -916,11 +930,30 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
             UserEvent::PageLoaded(id, url) => {
                 if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) {
                     tab.is_loading = false;
+                    tab.first_load_complete = true;
                     tab.url = if url == "about:blank" {
                         HOME_PAGE.into()
                     } else {
                         url.clone()
                     };
+                    if self.active_tab == Some(id) {
+                        if let Some(window) = self.window.as_ref() {
+                            let size = window.inner_size().to_logical::<u32>(window.scale_factor());
+                            let _ = tab.view.set_bounds(Rect {
+                                position: LogicalPosition::new(0, CHROME_HEIGHT).into(),
+                                size: LogicalSize::new(
+                                    size.width,
+                                    size.height.saturating_sub(CHROME_HEIGHT),
+                                )
+                                .into(),
+                            });
+                            let _ = tab.view.set_visible(true);
+                            if !self.window_shown {
+                                window.set_visible(true);
+                                self.window_shown = true;
+                            }
+                        }
+                    }
                     self.record_history(id, url);
                 }
             }
@@ -943,7 +976,7 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                     if let Some(chrome) = self.chrome.as_ref() {
                         let _ = chrome.set_bounds(Rect {
                             position: LogicalPosition::new(0, 0).into(),
-                            size: LogicalSize::new(size.width, CHROME_HEIGHT).into(),
+                            size: LogicalSize::new(size.width, size.height).into(),
                         });
                     }
                     if let Some(overlay) = self.overlay.as_ref() {
@@ -961,6 +994,22 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                             )
                             .into(),
                         });
+                    }
+                    // A maximized window may report its initial 1440x900
+                    // client size before the OS delivers the real size. Keep
+                    // page views hidden until this first resize has applied
+                    // the final child bounds, avoiding a white stale-size flash.
+                    if !self.layout_ready {
+                        self.layout_ready = true;
+                        if let Some(active_id) = self.active_tab {
+                            if let Some(tab) = self
+                                .tabs
+                                .iter()
+                                .find(|tab| tab.id == active_id && tab.first_load_complete)
+                            {
+                                let _ = tab.view.set_visible(true);
+                            }
+                        }
                     }
                 }
             }
