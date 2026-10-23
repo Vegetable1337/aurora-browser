@@ -4,7 +4,9 @@ param(
     [int]$TimeoutSeconds = 30,
     [int]$StableDelaySeconds = 0,
     [ValidateSet('dark', 'light')]
-    [string]$Theme = 'dark'
+    [string]$Theme = 'dark',
+    [ValidateSet('maximized', 'minimum')]
+    [string]$WindowSize = 'maximized'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,6 +14,15 @@ $ErrorActionPreference = 'Stop'
 [void][Reflection.Assembly]::Load('UIAutomationTypes')
 [void][Reflection.Assembly]::Load('System.Drawing')
 [void][Reflection.Assembly]::Load('System.Windows.Forms')
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class AuroraWindowTest {
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
+    [DllImport("user32.dll", SetLastError=true)] public static extern bool SetWindowPos(
+        IntPtr hwnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+}
+'@
 
 $exe = (Resolve-Path -LiteralPath $ExePath).Path
 $tempRoot = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
@@ -76,6 +87,15 @@ try {
 
     if ($null -eq $window) { throw "No visible Aurora window appeared within $TimeoutSeconds seconds." }
     if ($StableDelaySeconds -gt 0) { Start-Sleep -Seconds $StableDelaySeconds }
+    if ($WindowSize -eq 'minimum') {
+        $handle = [IntPtr]$window.Current.NativeWindowHandle
+        [void][AuroraWindowTest]::ShowWindow($handle, 9) # SW_RESTORE
+        $flags = [uint32](0x0004 -bor 0x0010) # SWP_NOZORDER | SWP_NOACTIVATE
+        if (-not [AuroraWindowTest]::SetWindowPos($handle, [IntPtr]::Zero, 0, 0, 720, 480, $flags)) {
+            throw "Could not resize Aurora to its declared 720x480 minimum (Win32 $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))."
+        }
+        Start-Sleep -Milliseconds 500
+    }
 
     $bounds = $window.Current.BoundingRectangle
     $windowX = [int][Math]::Floor($bounds.X)
@@ -109,6 +129,7 @@ try {
         RustToolchainAvailableToProcess = $false
         Profile = 'Disposable temporary profile'
         Theme = $Theme
+        WindowSize = $WindowSize
     } | ConvertTo-Json -Depth 3
 }
 finally {

@@ -48,8 +48,15 @@ presentation; the existing 12-second fallback still shows the window if startup
 does not complete. The capture script can seed only its disposable profile with
 light or dark theme settings; both actual window captures rendered the expected
 Aurora start page (`main-window.png` and `main-window-light.png`). The capture
-verifies rendering only; UIA still cannot operate the HTML controls, so it does
-not replace the manual interaction checklist.
+can also resize the actual window through Win32 to its declared 720x480 minimum.
+That exposed a second layout issue: the embedded page subtracted the 104px
+browser toolbar from its own viewport a second time. The page now uses its full
+WebView viewport and a compact-height layout. Dark and light captures at 720x480
+show the search form, all four shortcuts, and footer without vertical or
+horizontal scrolling (`minimum-window.png` and `minimum-window-light.png`).
+The captures verify rendering only; UIA still cannot operate the HTML controls,
+so they do not replace the manual interaction checklist. DPI 125/150/200,
+reduced-motion transitions, and small-window menus remain manual checks.
 
 ## Windows Alpha packaging
 
@@ -75,14 +82,23 @@ not replace the manual interaction checklist.
 GitHub Actions runs [39948687861](https://github.com/Vegetable1337/aurora-browser/actions/runs/39948687861),
 [39951158572](https://github.com/Vegetable1337/aurora-browser/actions/runs/39951158572),
 [39954380715](https://github.com/Vegetable1337/aurora-browser/actions/runs/39954380715),
-and [39957084924](https://github.com/Vegetable1337/aurora-browser/actions/runs/39957084924)
+[39957084924](https://github.com/Vegetable1337/aurora-browser/actions/runs/39957084924),
+and [39962596138](https://github.com/Vegetable1337/aurora-browser/actions/runs/39962596138)
 completed successfully for the pushed Alpha-preparation commits. Both
 Rust and legacy Python jobs passed, including format, tests, Clippy, UI
 JavaScript syntax, MV3 probe build, Windows build, dependency audit, and Python
 tests.
 
+After run 39962596138 passed on commit `5f08d77`, a local responsive-layout fix
+was rebuilt and checked: `cargo fmt --check`, 24 Rust tests, Clippy, Release
+build, UI JavaScript syntax, actual dark/light window captures, Release launch
+smoke, and installer lifecycle smoke all passed. The layout change is now in the
+worktree and its new commit still needs its own Actions run.
+
 Local validation also passed `cargo build --release --locked`, the Release
 launch smoke, UI syntax, `cargo audit`, and 19 Python unittests. `cargo audit`
 reports three non-failing warnings for the future Linux GTK/WebKit backend; see
 `../p0-audit.md`. No clean-VM install, no-WebView2 installer branch, or visual
-GUI regression was run. Use `manual-checklist.md` for those checks.
+GUI regression was run. The screenshot checks cover rendering but not
+interaction. No clean-VM install, no-WebView2 installer branch, DPI 125/150/200,
+or menu/panel GUI check was run. Use `manual-checklist.md` for those checks.
