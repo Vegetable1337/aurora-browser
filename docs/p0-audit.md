@@ -1,5 +1,8 @@
 # P0 audit — 2026-10-22
 
+Historical audit snapshot. For the subsequent working MV3 experiment and
+its measured limitations, see [extensions-prototype.md](extensions-prototype.md).
+
 ## Scope and current architecture
 
 The main application is `rust-browser/src/main.rs`: Winit event loop, Wry child

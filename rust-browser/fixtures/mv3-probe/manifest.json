@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "Aurora MV3 local probe",
+  "version": "1.0.0",
+  "description": "Local service-worker/content-script integration fixture. Not a user extension.",
+  "permissions": ["storage"],
+  "background": {"service_worker": "worker.js"},
+  "content_scripts": [{"matches": ["http://127.0.0.1/*"], "js": ["content.js"], "run_at": "document_idle"}]
+}
