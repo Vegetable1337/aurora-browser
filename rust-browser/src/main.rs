@@ -556,9 +556,14 @@ impl AuroraApp {
             });
         #[cfg(windows)]
         let builder = builder.with_browser_extensions_enabled(!is_private);
-        let view = builder
-            .build_as_child(window)
-            .expect("create Chromium page view");
+        let view = match builder.build_as_child(window) {
+            Ok(view) => view,
+            Err(error) => {
+                eprintln!("Aurora could not create WebView2 tab {id}: {error}");
+                self.show_chrome_toast("Не удалось создать вкладку. Попробуйте ещё раз.");
+                return;
+            }
+        };
         let event_profile = download_scope.clone();
         if let Err(error) = download_control.attach(&view, move |update| {
             let _ = download_proxy.send_event(UserEvent::DownloadChanged(
@@ -613,8 +618,11 @@ impl AuroraApp {
             self.permissions.clone()
         };
         #[cfg(windows)]
-        site_permissions::attach(&view, permissions.clone())
-            .expect("attach origin permission policy");
+        if let Err(error) = site_permissions::attach(&view, permissions.clone()) {
+            eprintln!("Aurora could not attach site permission policy to tab {id}: {error}");
+            self.show_chrome_toast("Не удалось включить защиту разрешений для вкладки.");
+            return;
+        }
         let mut privacy_attached = false;
         let tab_privacy = if is_private {
             Arc::new(privacy::PrivacyState::new(
@@ -1015,7 +1023,14 @@ impl AuroraApp {
         self.refresh_privacy_panel();
     }
 
-    fn activate_vault(&mut self, new_vault: vault::ProfileVault) {
+    fn activate_vault(&mut self, new_vault: vault::ProfileVault) -> Result<(), String> {
+        // Read every saved record before tearing down the current profile. A
+        // decryption or decode failure must leave the active profile untouched.
+        let bookmarks = load_vault_records(&new_vault, "bookmarks")?;
+        let history = load_vault_records(&new_vault, "history")?;
+        let data_dir = new_vault.directory().join("WebView2");
+        fs::create_dir_all(&data_dir)
+            .map_err(|error| format!("Не удалось открыть данные WebView2 профиля: {error}"))?;
         self.cancel_active_downloads();
         self.persist_downloads();
         // Destroy views before their WebView2 context so profile data is released
@@ -1024,8 +1039,6 @@ impl AuroraApp {
         self.tabs.clear();
         self.active_tab = None;
         self.context = None;
-        let data_dir = new_vault.directory().join("WebView2");
-        let _ = fs::create_dir_all(&data_dir);
         self.context = Some(wry::WebContext::new(Some(data_dir)));
         self.active_vault = Some(new_vault);
         self.configure_downloads();
@@ -1036,12 +1049,19 @@ impl AuroraApp {
             .directory()
             .to_path_buf();
         self.configure_privacy_state(profile_dir.join("privacy-sites.json"));
-        let vault = self.active_vault.as_ref().expect("vault just set");
-        self.bookmarks = Some(load_vault_records(vault, "bookmarks"));
-        self.history = Some(load_vault_records(vault, "history"));
+        self.bookmarks = Some(bookmarks);
+        self.history = Some(history);
         self.bookmarks_path = None;
         self.history_path = None;
         self.create_tab(HOME_PAGE);
+        Ok(())
+    }
+
+    fn show_chrome_toast(&self, message: &str) {
+        if let (Some(chrome), Ok(message)) = (self.chrome.as_ref(), serde_json::to_string(message))
+        {
+            let _ = chrome.evaluate_script(&format!("window.showToast({message})"));
+        }
     }
 
     fn activate_default_profile(&mut self) {
@@ -1867,7 +1887,10 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                                 if let Some(chrome) = self.chrome.as_ref() {
                                     let _ = chrome.evaluate_script(&format!("window.alert('Сохраните этот ключ восстановления отдельно. Он будет показан только сейчас:\\n\\n'+{recovery})"));
                                 }
-                                self.activate_vault(created.vault);
+                                if let Err(error) = self.activate_vault(created.vault) {
+                                    eprintln!("Aurora could not activate the new profile: {error}");
+                                    self.show_chrome_toast(&error);
+                                }
                             }
                             Err(error) => eprintln!("Aurora profile creation failed: {error}"),
                         }
@@ -1895,7 +1918,12 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                                 vault::ProfileVault::unlock_password(&directory, credential)
                             };
                             match result {
-                                Ok(profile) => self.activate_vault(profile),
+                                Ok(profile) => {
+                                    if let Err(error) = self.activate_vault(profile) {
+                                        eprintln!("Aurora could not activate the profile: {error}");
+                                        self.show_chrome_toast(&error);
+                                    }
+                                }
                                 Err(error) => {
                                     if let Some(chrome) = self.chrome.as_ref() {
                                         let message = serde_json::to_string(&error.to_string())
@@ -1974,7 +2002,14 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                                 backup_password,
                                 profile_password,
                             ) {
-                                Ok(profile) => self.activate_vault(profile),
+                                Ok(profile) => {
+                                    if let Err(error) = self.activate_vault(profile) {
+                                        eprintln!(
+                                            "Aurora could not activate the restored profile: {error}"
+                                        );
+                                        self.show_chrome_toast(&error);
+                                    }
+                                }
                                 Err(error) => {
                                     if let Some(chrome) = self.chrome.as_ref() {
                                         let message = serde_json::to_string(&error.to_string())
@@ -2636,12 +2671,16 @@ fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &Option<PathBuf>) -> 
 fn load_vault_records<T: for<'de> Deserialize<'de>>(
     vault: &vault::ProfileVault,
     domain: &str,
-) -> Vec<T> {
-    vault
+) -> Result<Vec<T>, String> {
+    let records = vault
         .list(domain)
-        .unwrap_or_default()
+        .map_err(|error| format!("Не удалось расшифровать хранилище профиля: {error}"))?;
+    records
         .into_iter()
-        .filter_map(|(_, bytes)| serde_json::from_slice(&bytes).ok())
+        .map(|(_, bytes)| {
+            serde_json::from_slice(&bytes)
+                .map_err(|_| format!("В зашифрованной области {domain} повреждена запись"))
+        })
         .collect()
 }
 
@@ -2789,6 +2828,26 @@ mod ui_navigation_tests {
         assert_eq!(
             resolve_input("nas.local", "duckduckgo", true),
             "http://nas.local"
+        );
+    }
+
+    #[test]
+    fn corrupt_encrypted_bookmark_record_fails_profile_loading() {
+        let root =
+            std::env::temp_dir().join(format!("aurora-record-load-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let result = {
+            let created = vault::ProfileVault::create(&root, "Test", "test password").unwrap();
+            created
+                .vault
+                .put("bookmarks", "corrupt", b"not json")
+                .unwrap();
+            load_vault_records::<Bookmark>(&created.vault, "bookmarks")
+        };
+        fs::remove_dir_all(&root).unwrap();
+        assert!(
+            result.is_err(),
+            "corrupt encrypted data must not look empty"
         );
     }
 }

@@ -75,12 +75,17 @@ mod probe {
                 .with_browser_extensions_enabled(true)
                 .with_url("about:blank")
                 .with_document_title_changed_handler(move |title| {
+                    eprintln!("Probe document title changed: {title:?}");
                     if let Some(proof) = title.strip_prefix("AURORA_MV3_OK:") {
                         let _ = proxy.send_event(Ok(proof.into()));
                     }
                     if title == "AURORA_PROBE_ERROR" {
                         let _ = proxy.send_event(Err("extension handshake failed".into()));
                     }
+                })
+                .with_on_page_load_handler(|event, url| match event {
+                    wry::PageLoadEvent::Started => eprintln!("Probe navigation started: {url}"),
+                    wry::PageLoadEvent::Finished => eprintln!("Probe navigation finished: {url}"),
                 })
                 .build(&window)?;
             let profile = unsafe {
@@ -137,7 +142,59 @@ mod probe {
                             );
                         }
                     });
-                    view.load_url(&url)?;
+                    // Do not navigate until WebView2 has asynchronously enumerated
+                    // this profile's persisted extension. Navigating immediately
+                    // after environment creation can race content-script startup.
+                    let core = unsafe { view.controller().CoreWebView2()? };
+                    let target = HSTRING::from(url);
+                    let proxy = self.proxy.clone();
+                    let callback = ProfileGetBrowserExtensionsCompletedHandler::create(Box::new(
+                        move |hr, list| {
+                            let result = (|| -> windows::core::Result<Option<bool>> {
+                                hr?;
+                                let list = list.ok_or_else(windows::core::Error::from_thread)?;
+                                let mut count = 0;
+                                unsafe {
+                                    list.Count(&mut count)?;
+                                }
+                                for index in 0..count {
+                                    let extension = unsafe { list.GetValueAtIndex(index)? };
+                                    let mut name = windows::core::PWSTR::null();
+                                    unsafe {
+                                        extension.Name(&mut name)?;
+                                    }
+                                    if take_pwstr(name) == "Aurora MV3 local probe" {
+                                        let mut enabled = windows::core::BOOL(0);
+                                        unsafe {
+                                            extension.IsEnabled(&mut enabled)?;
+                                        }
+                                        return Ok(Some(enabled.as_bool()));
+                                    }
+                                }
+                                Ok(None)
+                            })();
+                            match result {
+                                Ok(Some(enabled)) => {
+                                    eprintln!("MV3 fixture enabled before navigation: {enabled}");
+                                    if let Err(error) = unsafe { core.Navigate(&target) } {
+                                        let _ = proxy.send_event(Err(error.to_string()));
+                                    }
+                                }
+                                Ok(None) => {
+                                    let _ = proxy.send_event(Err(
+                                        "MV3 fixture was not present before navigation".into(),
+                                    ));
+                                }
+                                Err(error) => {
+                                    let _ = proxy.send_event(Err(error.to_string()));
+                                }
+                            }
+                            Ok(())
+                        },
+                    ));
+                    unsafe {
+                        profile.GetBrowserExtensions(&callback)?;
+                    }
                 }
                 operation => {
                     let operation = operation.to_owned();

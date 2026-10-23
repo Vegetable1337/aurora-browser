@@ -147,3 +147,30 @@ reported as non-failing warnings: unmaintained `proc-macro-error` and
 `ttf-parser`, and the existing `glib::VariantStrIter` unsoundness advisory.
 These warnings are not suppressed. The new GitHub Actions run for the fix must
 complete before CI is reported green.
+
+## Follow-up: fail-closed profile activation and WebView2 extension restart probe (2026-10-23)
+
+Protected profile activation now loads and decrypts all bookmark/history records
+and prepares the profile's WebView2 data directory before destroying the current
+profile's tabs/context. Decryption or JSON corruption fails activation instead of
+silently presenting empty data. A regression test writes an authenticated but
+invalid JSON record to a disposable vault and confirms loading fails. WebView
+construction and site-permission policy attachment now report recoverable errors
+instead of panicking; a page is not loaded when permission protection could not
+be attached.
+
+The Windows WebView2 MV3 probe exposed a race after environment restart: persisted
+extension enumeration was still pending when the next page navigation began. The
+probe now waits for `GetBrowserExtensions` and confirms the local fixture exists
+before navigation. A fresh 16-check run passed on WebView2 Runtime 155.0.4283.62,
+including extension worker/content-script handshakes, enable/disable/remove,
+restart persistence, and profile A/B isolation. Evidence and limits are recorded
+in `docs/extensions-prototype.md`; this is a native WebView2 probe, not a visual
+test of Aurora's main window.
+
+Post-change checks passed locally: `cargo fmt --check`, `cargo test --locked`
+(22 tests), `cargo clippy --all-targets --locked -- -D warnings`,
+`cargo build --locked`, `node packaging/check-ui-syntax.cjs`, and the 19 legacy
+Python unittests. GitHub Actions run [39940708619](https://github.com/Vegetable1337/aurora-browser/actions/runs/39940708619)
+completed successfully: formatting, tests, UI syntax, probe build, Windows app
+build, dependency audit, and the legacy Python job all passed.

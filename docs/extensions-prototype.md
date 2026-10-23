@@ -124,3 +124,22 @@ outstanding and must not be reported as passing based on these results.
 
 Microsoft documents that extensions are persisted, unpacked files are not copied
 into the profile, and Chrome toolbar UI entry points are absent in WebView2.
+# Windows WebView2 extension probe — 2026-10-23
+
+The 16-check run completed against the native WebView2 runtime 155.0.4283.62
+using isolated temporary profiles A and B. It verified local MV3 installation,
+enumeration, content-script/service-worker execution, persisted state across
+WebView2 process restarts, enable/disable/remove, and profile isolation. A disabled
+extension produced no handshake and was reported as the expected 20-second
+negative probe; enabling it restored the handshake. Profile B retained its own
+extension after the copy in A was removed.
+
+The first run exposed a restart race: the probe navigated immediately after
+creating a WebView2 environment, before the profile's extension enumeration had
+completed. The harness now waits for `GetBrowserExtensions` to enumerate the
+fixture and read its enabled state before navigating. The repeated full run
+passed all 16 checks. Result JSON and per-operation output were retained under
+the ignored disposable directory `rust-browser/target/extensions-check-ba5598dd4b2c45d8acd60f31a3f1a900/`.
+
+This is a real WebView2 API integration test through the standalone probe
+harness. It does not claim that the Aurora main-window GUI was visually tested.
