@@ -145,8 +145,8 @@ Local validation after the dependency update: `cargo fmt --check`, `cargo test
 -v` (19 tests) passed. `cargo audit` exited successfully with three advisories
 reported as non-failing warnings: unmaintained `proc-macro-error` and
 `ttf-parser`, and the existing `glib::VariantStrIter` unsoundness advisory.
-These warnings are not suppressed. The new GitHub Actions run for the fix must
-complete before CI is reported green.
+These warnings are not suppressed. The initial audit failures were subsequently
+resolved by `ae94e48`; runs on later commits were checked below.
 
 ## Follow-up: fail-closed profile activation and WebView2 extension restart probe (2026-10-23)
 
@@ -187,5 +187,101 @@ permission-policy JSON records.
 
 Verification after this change: `cargo fmt --check`, `cargo test --locked`
 (23 tests), `cargo clippy --all-targets --locked -- -D warnings`, and
-`cargo build --locked` passed. GitHub Actions for commit `808e5d7` passed all jobs;
-the new follow-up commit still needs its own remote CI run.
+`cargo build --locked` passed. GitHub Actions runs for `808e5d7` and `afeb144`
+also completed successfully.
+
+## Windows 0.1.0 Alpha preparation (2026-10-23)
+
+### P0 — HEAD, CI, dependency audit
+
+At the start of this stage, local `HEAD` and `origin/main` were both `afeb144` and
+the worktree was clean. GitHub Actions run
+[39943350716](https://github.com/Vegetable1337/aurora-browser/actions/runs/39943350716)
+for that exact SHA completed successfully. Earlier failed runs on `b8b5bb4`,
+`bef1610`, `2660b30`, and `33897ef` failed only in `cargo audit`; the Rust tests,
+builds and legacy Python jobs shown in their job summaries completed. The logs
+identify yanked/vulnerable Tokio 1.54.0 and vulnerable zip 2.6.1. The dependency
+update in `ae94e48` moved to Tokio 1.54.1 and zip 9.0.5; Actions run
+[39940708619](https://github.com/Vegetable1337/aurora-browser/actions/runs/39940708619)
+and the later runs for `808e5d7` and `afeb144` all passed. The audit still emits
+three allowed warnings for Linux-only backend dependencies, listed below.
+
+`cargo audit` exits 0 with three allowed warnings:
+
+- `proc-macro-error` is unmaintained and enters through GTK/GLib macros for the
+  Linux WebKit backend; it is not in the Windows target dependency graph.
+- `ttf-parser` is unmaintained and enters through `sctk-adwaita` for the Linux
+  winit backend; it is not in the Windows target dependency graph.
+- `glib::VariantStrIter` has an unsound iterator advisory in the Linux GTK/WebKit
+  backend. Aurora does not call that API directly. The warning remains relevant
+  to a future Linux build and is not suppressed.
+
+The warning paths were checked with `cargo tree --locked --target all -i ...`.
+These are not known exploitable findings in the Windows Alpha target, but the
+Linux backend must not be described as security-cleared.
+
+### P1/P2 — installer and release package
+
+Selected Inno Setup 6.7.3 for a per-user install under
+`%LOCALAPPDATA%\Programs\Aurora Browser`. The stable `AppId` supports installing
+over the same application; user profiles remain under `%LOCALAPPDATA%\Aurora\Rust`,
+outside the install directory, and no uninstall-delete rule targets them. Setup
+adds a Start menu entry, offers a desktop shortcut unchecked by default, does not
+add a Run-at-startup entry, and requires no elevation. It checks the documented
+WebView2 `pv` registry value; if absent, it opens Microsoft's official download
+page and exits. Runtime detection follows Microsoft's documented registry paths:
+[WebView2 distribution and runtime detection](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution).
+
+The executable version is now `0.1.0-alpha`; PE metadata was inspected and reports
+ProductName `Aurora Browser`, ProductVersion `0.1.0-alpha`, FileVersion `0.1.0.0`,
+and OriginalFilename `Aurora.exe`. `cargo build --release --locked` succeeded.
+Inno Setup 6.7.3 compiled the installer without warnings after setting the
+architecture to `x64compatible`. A per-user installation, Start menu and desktop
+shortcuts, repeat installation, and uninstall were exercised in an isolated
+temporary directory; the directory and shortcuts were removed. This did not use
+a clean Windows VM and does not prove the missing-WebView2 branch or preservation
+of a real existing user profile.
+
+The portable ZIP was inspected and contains exactly `Aurora.exe`, `LICENSE`, and
+`README.txt`; it contains no tests or user profiles. `dist/alpha/SHA256SUMS.txt`
+contains SHA-256 hashes for both the installer and ZIP. The release workflow now
+uses `workflow_dispatch` only and uploads artifacts; it has no release-publish
+step or write permission. No GitHub Release was created.
+
+### P3/P4/P6/P7 — compatibility test and user docs
+
+A 1,553-byte inner ZIP fixture was generated with the previous `zip 2.6.1` library.
+The new `restores_profile_backup_payload_written_by_zip_261` test wraps that old
+payload in the unchanged authenticated backup envelope and restores a real
+encrypted vault record. Both this test and the current-format backup round trip
+pass. The full current Windows GUI checklist is in `docs/alpha/manual-checklist.md`;
+it is explicitly a plan, not claimed GUI evidence. No clean Windows VM was
+available for the missing-runtime installer path, first-run visual checks, or
+profile-preservation install/uninstall check.
+
+Windows Alpha docs include install/update/remove instructions, requirements,
+supported and experimental capabilities, known security limits, and backup
+recommendations. `CHANGELOG.md` and the root README link to them.
+
+### Final Release launch smoke
+
+The first Release launch smoke exposed a real packaging defect: the optimized
+EXE still had PE subsystem `3` (console), so an unwanted console window appeared.
+`#![windows_subsystem = "windows"]` alone did not change the linked executable
+in this setup. `build.rs` now adds `/SUBSYSTEM:WINDOWS` for the Windows Release
+binary only; Debug test harnesses remain console applications. The final EXE was
+inspected and reports PE subsystem `2` (Windows GUI). The bounded smoke test ran
+the Release EXE with a temporary profile and a PATH containing Windows system
+directories only, found a visible `Aurora` HWND, found no visible console HWND,
+sent `WM_CLOSE`, and observed exit code 0. This checks process launch and window
+lifecycle, not interaction with page controls. Packages and SHA-256 sums were
+regenerated after the subsystem fix.
+
+Final local checks: `cargo fmt --check`, `cargo test --locked` (24 tests),
+`cargo clippy --all-targets --locked -- -D warnings`, UI/MV3 fixture JavaScript
+syntax check, `cargo audit` (three documented Linux-backend warnings), and
+`python -m unittest discover -s tests -v` (19 tests) passed. The final optimized
+Release build succeeded. Installer install/update/uninstall was exercised in an
+isolated temporary directory earlier in this work; it was not rerun after the
+subsystem-only binary change. The missing-WebView2 branch and clean-VM behavior
+remain unverified.

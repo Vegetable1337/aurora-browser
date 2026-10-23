@@ -1,6 +1,6 @@
 [package]
 name = "aurora-browser"
-version = "0.2.0-alpha.1"
+version = "0.1.0-alpha"
 edition = "2024"
 description = "Aurora desktop browser, Rust and WebView2 prototype"
 license = "MIT"

@@ -16,11 +16,23 @@ Aurora is an early-stage browser project. The primary desktop application is Rus
 
 > **Status:** Experimental alpha. Aurora has not undergone a security audit and is not a hardened privacy browser. Do not rely on it for sensitive browsing.
 
+**Windows Alpha 0.1.0:** per-user installer and portable ZIP are built manually
+from GitHub Actions; no GitHub Release is published automatically. Installation,
+upgrade, removal, limitations, and manual test steps are documented in
+[`docs/alpha/README.txt`](docs/alpha/README.txt) and
+[`docs/alpha/manual-checklist.md`](docs/alpha/manual-checklist.md). See
+[`CHANGELOG.md`](CHANGELOG.md) for this alpha's scope.
+
 ---
 
 ## Русский
 
 Aurora — экспериментальный настольный браузер для Windows с упором на приватность и прозрачное описание ограничений. Основное приложение написано на Rust и Wry с движком Microsoft Edge WebView2; прежняя версия на Python и Qt WebEngine оставлена как справочная на время переноса функций.
+
+Для тестирования подготовлены Windows x64 Alpha 0.1.0: установщик для текущего
+пользователя и portable ZIP. Автоматическая публикация GitHub Release отключена.
+См. [установку, обновление, удаление и ограничения](docs/alpha/README.txt),
+[ручной чек-лист](docs/alpha/manual-checklist.md) и [изменения](CHANGELOG.md).
 
 ### Возможности
 
@@ -109,6 +121,11 @@ Qt WebEngine и WebView2 поставляются и обновляются от
 
 Aurora is an experimental Windows desktop browser project focused on privacy and clear documentation of its limitations. Its primary application is written in Rust and Wry with Microsoft Edge WebView2; the former Python/Qt WebEngine application remains as a migration reference.
 
+Windows x64 Alpha 0.1.0 is packaged as a per-user installer and portable ZIP.
+GitHub Release publication is not automatic. See the [installation, update,
+removal and limitation notes](docs/alpha/README.txt), the [manual test
+checklist](docs/alpha/manual-checklist.md), and the [changelog](CHANGELOG.md).
+
 ### Features
 
 **Python application (`app/`)**
@@ -194,6 +211,10 @@ Aurora source code is distributed under the MIT License. Third-party dependencie
 ## 简体中文
 
 Aurora 是一个面向 Windows 的实验性桌面浏览器项目，注重隐私并明确说明当前限制。主要应用使用 Rust、Wry 和 Microsoft Edge WebView2；旧版 Python/Qt WebEngine 应用暂时保留为功能迁移参考。
+
+Windows x64 Alpha 0.1.0 提供当前用户安装程序和便携 ZIP 包；GitHub Release
+不会自动发布。请参阅[安装、更新、卸载与限制](docs/alpha/README.txt)、
+[手动测试清单](docs/alpha/manual-checklist.md)和[更新日志](CHANGELOG.md)。
 
 ### 功能
 

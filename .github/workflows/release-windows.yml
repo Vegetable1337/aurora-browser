@@ -1,44 +1,69 @@
-name: Aurora Windows alpha release
+name: Build Windows Alpha artifacts
+
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
+
 permissions:
-  contents: write
+  contents: read
+
 jobs:
-  build-and-release:
+  windows-alpha:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
-      - name: Format and test
+          toolchain: 1.99.1
+          components: rustfmt, clippy
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependency auditor
+        run: cargo install cargo-audit --locked --version 0.22.2
+
+      - name: Verify format, tests, lints, UI syntax, and dependencies
         working-directory: rust-browser
+        shell: pwsh
         run: |
           cargo fmt --check
           cargo test --locked
-      - name: Build optimized Windows binary
+          cargo clippy --all-targets --locked -- -D warnings
+          node ../packaging/check-ui-syntax.cjs
+          cargo audit
+
+      - name: Build optimized Windows executable
         working-directory: rust-browser
         run: cargo build --release --locked
-      - name: Package portable alpha
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force release | Out-Null
-          Copy-Item rust-browser/target/release/aurora-browser.exe release/Aurora.exe
-          @'
-          Aurora Browser Windows alpha
 
-          Requires the Microsoft Edge WebView2 Runtime and a supported Windows system.
-          This is an early alpha: extensions are not supported. Protected profiles do not
-          encrypt WebView2 browser data at rest. Do not use this build for sensitive data.
-          See README.md and docs/p0-audit.md for supported features and known limitations.
-          '@ | Set-Content release/README.txt
-          Compress-Archive -Path release/* -DestinationPath Aurora-Windows-x64.zip
-      - name: Publish GitHub prerelease
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Check executable metadata
         shell: pwsh
         run: |
-          gh release create "${{ github.ref_name }}" Aurora-Windows-x64.zip `
-            --title "Aurora Browser ${{ github.ref_name }}" `
-            --prerelease --verify-tag --notes-file docs/p0-audit.md
+          $exe = Get-Item rust-browser/target/release/aurora-browser.exe
+          if ($exe.VersionInfo.ProductName -ne 'Aurora Browser') { throw "Unexpected ProductName: $($exe.VersionInfo.ProductName)" }
+          if ($exe.VersionInfo.ProductVersion -ne '0.1.0-alpha') { throw "Unexpected ProductVersion: $($exe.VersionInfo.ProductVersion)" }
+          if ($exe.VersionInfo.OriginalFilename -ne 'Aurora.exe') { throw "Unexpected OriginalFilename: $($exe.VersionInfo.OriginalFilename)" }
+
+      - name: Install Inno Setup 6.7.3
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          Invoke-WebRequest -Uri 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $installer
+          $actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732') { throw "Inno Setup checksum mismatch: $actualHash" }
+          $process = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-') -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Inno Setup installation failed: $($process.ExitCode)" }
+
+      - name: Build per-user installer and portable ZIP
+        shell: pwsh
+        run: ./packaging/package-alpha.ps1 -IsccPath 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+
+      - name: Upload Windows Alpha artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aurora-Windows-x64-0.1.0-alpha
+          path: dist/alpha/*
+          if-no-files-found: error
+          retention-days: 30

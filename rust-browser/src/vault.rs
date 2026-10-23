@@ -1123,4 +1123,45 @@ mod tests {
             .is_err()
         );
     }
+
+    #[test]
+    fn restores_profile_backup_payload_written_by_zip_261() {
+        // This ZIP payload was produced by zip 2.6.1, the version used before
+        // Aurora upgraded its archive reader/writer to zip 9.0.5.
+        let root = Fixture::new();
+        fs::create_dir_all(&root.0).unwrap();
+        let backup_password = "legacy archive password";
+        let salt = [0x3c; SALT_BYTES];
+        let nonce = [0x7d; NONCE_BYTES];
+        let key = Zeroizing::new(password_key(backup_password, &salt).unwrap());
+        let payload = include_bytes!("../fixtures/legacy-v1-backup-payload.zip");
+        let encrypted = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key[..]))
+            .encrypt(
+                Nonce::from_slice(&nonce),
+                aes_gcm::aead::Payload {
+                    msg: payload,
+                    aad: BACKUP_AAD,
+                },
+            )
+            .unwrap();
+        let mut backup_bytes = Vec::new();
+        backup_bytes.extend_from_slice(BACKUP_MAGIC);
+        backup_bytes.extend_from_slice(&salt);
+        backup_bytes.extend_from_slice(&nonce);
+        backup_bytes.extend_from_slice(&encrypted);
+        let backup_path = root.0.join("legacy-v1.aurorabk");
+        fs::write(&backup_path, backup_bytes).unwrap();
+
+        let restored = ProfileVault::restore_backup(
+            &backup_path,
+            &root.0.join("restored-legacy"),
+            backup_password,
+            "fixture profile password 2026",
+        )
+        .unwrap();
+        assert_eq!(
+            restored.get("bookmarks", "fixture").unwrap().unwrap(),
+            br#"{"title":"Legacy ZIP 2.6.1 fixture","url":"https://example.invalid/"}"#
+        );
+    }
 }

@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use aurora_browser::{
     downloads, extensions, https_first, privacy, site_data, site_permissions, vault,
 };
