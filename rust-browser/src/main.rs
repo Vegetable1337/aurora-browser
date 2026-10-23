@@ -1,4 +1,6 @@
-use aurora_browser::{extensions, https_first, privacy, site_data, site_permissions, vault};
+use aurora_browser::{
+    downloads, extensions, https_first, privacy, site_data, site_permissions, vault,
+};
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -37,6 +39,7 @@ enum UserEvent {
     ProfileCacheDone(u64, Result<(), String>),
     HttpNavigationBlocked(u64, String),
     HttpsNavigationFailed(u64, String),
+    DownloadChanged(u64, String, bool, downloads::DownloadUpdate),
     PageTitle(u64, String),
     PageLoading(u64, bool),
     PageLoaded(u64, String),
@@ -66,6 +69,23 @@ struct BrowserTab {
     privacy: Arc<privacy::PrivacyState>,
     is_private: bool,
     view: WebView,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct DownloadRecord {
+    id: u64,
+    tab_id: u64,
+    profile_scope: String,
+    private: bool,
+    url: String,
+    path: String,
+    received: u64,
+    total: Option<u64>,
+    state: String,
+    error: Option<String>,
+    started_ms: u128,
+    #[serde(default)]
+    speed: Option<u64>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -437,6 +457,9 @@ impl AuroraApp {
             .join("Downloads");
         let _ = fs::create_dir_all(&downloads_dir);
         let download_dir_for_handler = downloads_dir.clone();
+        let download_scope = self.download_scope.clone();
+        let download_control = self.download_control.clone();
+        let download_proxy = self.proxy.as_ref().expect("event loop proxy").clone();
         let mut builder = if is_private {
             WebViewBuilder::new()
         } else {
@@ -500,7 +523,7 @@ impl AuroraApp {
                 let name = url::Url::parse(&url)
                     .ok()
                     .and_then(|parsed| parsed.path_segments()?.next_back().map(str::to_owned))
-                    .filter(|name| !name.is_empty())
+                    .map(|name| downloads::safe_suggested_filename(&name))
                     .unwrap_or_else(|| "download".into());
                 match rfd::FileDialog::new()
                     .set_directory(&download_dir_for_handler)
@@ -536,6 +559,17 @@ impl AuroraApp {
         let view = builder
             .build_as_child(window)
             .expect("create Chromium page view");
+        let event_profile = download_scope.clone();
+        if let Err(error) = download_control.attach(&view, move |update| {
+            let _ = download_proxy.send_event(UserEvent::DownloadChanged(
+                id,
+                event_profile.clone(),
+                is_private,
+                update,
+            ));
+        }) {
+            eprintln!("Aurora could not attach the WebView2 download manager: {error}");
+        }
         let https_fallback_candidate = Arc::new(Mutex::new(None::<String>));
         let candidate_for_handler = https_fallback_candidate.clone();
         let https_setting_for_handler = https_first_enabled.clone();
@@ -665,7 +699,15 @@ impl AuroraApp {
         let Some(index) = self.tabs.iter().position(|tab| tab.id == id) else {
             return;
         };
+        if self.tabs[index].is_private {
+            self.cancel_private_downloads_for_tab(id);
+            self.downloads
+                .retain(|download| !(download.private && download.tab_id == id));
+            self.refresh_downloads_overlay();
+        }
         if self.tabs.len() == 1 {
+            self.cancel_active_downloads();
+            self.persist_downloads();
             event_loop.exit();
             return;
         }
@@ -974,6 +1016,8 @@ impl AuroraApp {
     }
 
     fn activate_vault(&mut self, new_vault: vault::ProfileVault) {
+        self.cancel_active_downloads();
+        self.persist_downloads();
         // Destroy views before their WebView2 context so profile data is released
         // and the old cookie store is no longer attached to any tab.
         self.overlay = None;
@@ -984,6 +1028,7 @@ impl AuroraApp {
         let _ = fs::create_dir_all(&data_dir);
         self.context = Some(wry::WebContext::new(Some(data_dir)));
         self.active_vault = Some(new_vault);
+        self.configure_downloads();
         let profile_dir = self
             .active_vault
             .as_ref()
@@ -1000,6 +1045,8 @@ impl AuroraApp {
     }
 
     fn activate_default_profile(&mut self) {
+        self.cancel_active_downloads();
+        self.persist_downloads();
         self.overlay = None;
         self.tabs.clear();
         self.active_tab = None;
@@ -1009,6 +1056,7 @@ impl AuroraApp {
         };
         self.context = Some(wry::WebContext::new(Some(data_dir.clone())));
         self.active_vault = None;
+        self.configure_downloads();
         self.configure_privacy_state(data_dir.join("privacy-sites.json"));
         self.bookmarks_path = Some(data_dir.join("bookmarks.json"));
         self.history_path = Some(data_dir.join("history.json"));
@@ -1061,6 +1109,210 @@ impl AuroraApp {
         )));
         self.privacy_path = self.active_vault.is_none().then_some(path);
     }
+
+    fn configure_downloads(&mut self) {
+        if let Some(vault) = self.active_vault.as_ref() {
+            self.download_scope = vault.profile_id().to_owned();
+            self.downloads = vault
+                .list("downloads")
+                .ok()
+                .into_iter()
+                .flatten()
+                .find(|(id, _)| id == "history")
+                .and_then(|(_, bytes)| serde_json::from_slice::<Vec<DownloadRecord>>(&bytes).ok())
+                .unwrap_or_default();
+        } else {
+            self.download_scope = "default".into();
+            self.downloads = self
+                .default_data_dir
+                .as_ref()
+                .map(|dir| read_json(&Some(dir.join("downloads.json"))))
+                .unwrap_or_default();
+        }
+        self.download_speed_samples.clear();
+    }
+
+    fn persist_downloads(&self) {
+        let records: Vec<_> = self
+            .downloads
+            .iter()
+            .filter(|download| !download.private)
+            .cloned()
+            .collect();
+        if let Some(vault) = self.active_vault.as_ref() {
+            if let Ok(bytes) = serde_json::to_vec(&records)
+                && let Err(error) = vault.put("downloads", "history", &bytes)
+            {
+                eprintln!("Aurora encrypted download history save failed: {error}");
+            }
+        } else if let Some(dir) = self.default_data_dir.as_ref()
+            && let Err(error) = write_json_atomically(&dir.join("downloads.json"), &records)
+        {
+            eprintln!("Aurora download history save failed: {error}");
+        }
+    }
+
+    fn cancel_active_downloads(&mut self) {
+        let active: Vec<_> = self
+            .downloads
+            .iter()
+            .filter(|item| item.state == "in_progress")
+            .map(|item| item.id)
+            .collect();
+        for id in &active {
+            let _ = self.download_control.cancel(*id);
+        }
+        for download in &mut self.downloads {
+            if active.contains(&download.id) {
+                download.state = "interrupted".into();
+                download.error =
+                    Some("Загрузка остановлена при закрытии или переключении профиля".into());
+                download.speed = None;
+            }
+        }
+        self.download_speed_samples.clear();
+    }
+
+    fn cancel_private_downloads_for_tab(&self, tab_id: u64) {
+        for download in self
+            .downloads
+            .iter()
+            .filter(|item| item.private && item.tab_id == tab_id && item.state == "in_progress")
+        {
+            let _ = self.download_control.cancel(download.id);
+        }
+    }
+
+    fn download_is_visible(&self, item: &DownloadRecord) -> bool {
+        let active_id = self.active_tab;
+        let active_private = self
+            .active_tab
+            .and_then(|id| self.tabs.iter().find(|tab| tab.id == id))
+            .is_some_and(|tab| tab.is_private);
+        if active_private {
+            item.private && Some(item.tab_id) == active_id
+        } else {
+            !item.private
+        }
+    }
+
+    fn refresh_downloads_overlay(&self) {
+        let Some(overlay) = self.overlay.as_ref() else {
+            return;
+        };
+        let entries: Vec<_> = self
+            .downloads
+            .iter()
+            .filter(|item| self.download_is_visible(item))
+            .map(|item| {
+                let file_name = std::path::Path::new(&item.path)
+                    .file_name()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .unwrap_or("Файл");
+                serde_json::json!({
+                    "id": item.id,
+                    "name": file_name,
+                    "url": item.url,
+                    "path": item.path,
+                    "received": item.received,
+                    "total": item.total,
+                    "state": item.state,
+                    "error": item.error,
+                    "speed": item.speed,
+                    "private": item.private,
+                })
+            })
+            .collect();
+        let json = serde_json::to_string(&entries).unwrap_or_else(|_| "[]".into());
+        let _ = overlay.evaluate_script(&format!("window.setDownloads({json})"));
+    }
+
+    fn apply_download_update(
+        &mut self,
+        tab_id: u64,
+        profile_scope: String,
+        private: bool,
+        update: downloads::DownloadUpdate,
+    ) {
+        if private
+            && !self
+                .tabs
+                .iter()
+                .any(|tab| tab.id == tab_id && tab.is_private)
+        {
+            return;
+        }
+        if profile_scope != self.download_scope {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let is_new = !self
+            .downloads
+            .iter()
+            .any(|download| download.id == update.id);
+        let speed = self
+            .download_speed_samples
+            .get(&update.id)
+            .and_then(|(previous, at)| {
+                let elapsed = now.duration_since(*at).as_secs_f64();
+                (elapsed > 0.0 && update.received >= *previous)
+                    .then_some(((update.received - *previous) as f64 / elapsed) as u64)
+            });
+        self.download_speed_samples
+            .insert(update.id, (update.received, now));
+        if let Some(record) = self
+            .downloads
+            .iter_mut()
+            .find(|download| download.id == update.id)
+        {
+            record.path = update.path;
+            record.received = update.received;
+            record.total = update.total;
+            record.state = update.state.clone();
+            record.error = update.error;
+            if speed.is_some() {
+                record.speed = speed;
+            }
+        } else {
+            self.downloads.push(DownloadRecord {
+                id: update.id,
+                tab_id,
+                profile_scope,
+                private,
+                url: update.url,
+                path: update.path,
+                received: update.received,
+                total: update.total,
+                state: update.state.clone(),
+                error: update.error,
+                started_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |duration| duration.as_millis()),
+                speed,
+            });
+        }
+        if update.state != "in_progress" {
+            self.download_speed_samples.remove(&update.id);
+        }
+        if is_new || update.state != "in_progress" {
+            self.persist_downloads();
+        }
+        self.refresh_downloads_overlay();
+    }
+
+    fn open_downloaded_file(&self, id: u64) {
+        let Some(download) = self.downloads.iter().find(|item| {
+            item.id == id && item.state == "completed" && self.download_is_visible(item)
+        }) else {
+            return;
+        };
+        let path = std::path::Path::new(&download.path);
+        if path.is_file() {
+            let _ = std::process::Command::new("explorer.exe")
+                .arg(format!("/select,{}", path.display()))
+                .spawn();
+        }
+    }
 }
 
 #[derive(Default)]
@@ -1091,6 +1343,10 @@ struct AuroraApp {
     privacy_path: Option<PathBuf>,
     filter_list_count: usize,
     permissions: site_permissions::SharedPolicy,
+    download_control: downloads::DownloadControl,
+    downloads: Vec<DownloadRecord>,
+    download_scope: String,
+    download_speed_samples: std::collections::HashMap<u64, (u64, std::time::Instant)>,
 }
 
 impl ApplicationHandler<UserEvent> for AuroraApp {
@@ -1185,6 +1441,7 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
         self.configure_privacy_state(data_dir.join("privacy-sites.json"));
         self.profiles_root = Some(data_dir.parent().unwrap_or(&data_dir).join("Profiles"));
         self.default_data_dir = Some(data_dir.clone());
+        self.configure_downloads();
         self.chrome = Some(chrome);
         self.window = Some(window);
         self.ui_context = Some(ui_context);
@@ -1382,6 +1639,9 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                 if self.active_tab == Some(id) {
                     self.confirm_http_navigation(id, url, true);
                 }
+            }
+            UserEvent::DownloadChanged(tab_id, profile_scope, private, update) => {
+                self.apply_download_update(tab_id, profile_scope, private, update);
             }
             UserEvent::StartupTimeout => {
                 if !self.window_shown
@@ -2046,6 +2306,34 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                         .arg(downloads)
                         .spawn();
                 }
+                "downloads_refresh" => self.refresh_downloads_overlay(),
+                "download_cancel" => {
+                    if let Some(id) = command
+                        .value
+                        .as_deref()
+                        .and_then(|id| id.parse::<u64>().ok())
+                        && self.downloads.iter().any(|download| {
+                            download.id == id
+                                && download.state == "in_progress"
+                                && self.download_is_visible(download)
+                        })
+                        && let Err(error) = self.download_control.cancel(id)
+                        && let (Some(overlay), Ok(message)) =
+                            (self.overlay.as_ref(), serde_json::to_string(&error))
+                    {
+                        let _ =
+                            overlay.evaluate_script(&format!("window.downloadError({message})"));
+                    }
+                }
+                "download_show_file" => {
+                    if let Some(id) = command
+                        .value
+                        .as_deref()
+                        .and_then(|id| id.parse::<u64>().ok())
+                    {
+                        self.open_downloaded_file(id);
+                    }
+                }
                 "settings_update" => {
                     if let Some(value) = command.value.as_deref() {
                         if let Some(value) = value.strip_prefix("search_engine=") {
@@ -2259,7 +2547,11 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                     }
                 }
             }
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.cancel_active_downloads();
+                self.persist_downloads();
+                event_loop.exit();
+            }
             _ => {}
         }
     }
