@@ -89,11 +89,10 @@ Rust and legacy Python jobs passed, including format, tests, Clippy, UI
 JavaScript syntax, MV3 probe build, Windows build, dependency audit, and Python
 tests.
 
-After run 39962596138 passed on commit `5f08d77`, a local responsive-layout fix
-was rebuilt and checked: `cargo fmt --check`, 24 Rust tests, Clippy, Release
-build, UI JavaScript syntax, actual dark/light window captures, Release launch
-smoke, and installer lifecycle smoke all passed. The layout change is now in the
-worktree and its new commit still needs its own Actions run.
+After run 39962596138 passed on commit `5f08d77`, the responsive-layout fix was
+rebuilt and checked: `cargo fmt --check`, 24 Rust tests, Clippy, Release build,
+UI JavaScript syntax, actual dark/light window captures, Release launch smoke,
+and installer lifecycle smoke all passed.
 
 ### Light-theme contrast follow-up
 
@@ -129,15 +128,30 @@ aa941c599e57d1e183513a1731cf50cf91a4b73da956bd093e8a204f0d91dc77  Aurora-0.1.0-a
 ```
 
 GitHub Actions run [39965491576](https://github.com/Vegetable1337/aurora-browser/actions/runs/39965491576)
-for commit `44a01f0` passed its Rust formatting, tests, UI syntax, WebView2 probe
-build, Windows build, and Python job at the latest check. `cargo install
-cargo-audit --locked` was still running, so that run is not yet recorded as
-successful. The light-theme contrast follow-up is local and requires a new CI
-run after it is committed and pushed.
+for commit `44a01f0` completed successfully, including Rust formatting, tests,
+UI syntax, WebView2 probe build, Windows build, dependency audit, and Python job.
+The light-theme contrast follow-up was committed and pushed as `52158d8`; its
+Actions run [39967176191](https://github.com/Vegetable1337/aurora-browser/actions/runs/39967176191)
+passed the Python job and Rust formatting/tests/build steps, and was still
+installing `cargo-audit` at the last check. The overlay stacking change in this
+document has not yet been pushed.
+
+## Windows overlay stacking fix
+
+The menu scrim appeared over the page while most of the menu card was obscured.
+The toolbar, overlay, and page are separate child WebViews, and the hidden overlay
+kept an older native child-window z-order when shown again. On Windows the app now
+raises the overlay WebView HWND when opening it, then raises the active page HWND
+after the close animation hides the overlay. This uses the normal child-window
+z-order API and does not expose a page IPC command. Release compilation and all
+24 Rust tests, Clippy, formatting, and UI/MV3 syntax checks passed after the fix.
+The user reported that pasted links started working during diagnosis; no URL
+navigation change was made. GUI menu interaction still needs manual confirmation
+because the UI Automation tree does not expose these HTML controls.
 
 Local validation also passed `cargo build --release --locked`, the Release
 launch smoke, UI syntax, `cargo audit`, and 19 Python unittests. `cargo audit`
-reports three non-failing warnings for the future Linux GTK/WebKit backend; see
+reports three non-failing warnings for transitive GTK/WebKit-related dependencies; see
 `../p0-audit.md`. No clean-VM install, no-WebView2 installer branch, or visual
 GUI regression was run. The screenshot checks cover rendering but not
 interaction. No clean-VM install, no-WebView2 installer branch, DPI 125/150/200,

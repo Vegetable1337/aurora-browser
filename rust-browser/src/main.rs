@@ -17,9 +17,9 @@ use winit::{
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     window::{Icon, Window, WindowId},
 };
-#[cfg(windows)]
-use wry::WebViewBuilderExtWindows;
 use wry::{PageLoadEvent, Rect, WebView, WebViewBuilder, dpi::LogicalPosition};
+#[cfg(windows)]
+use wry::{WebViewBuilderExtWindows, WebViewExtWindows};
 
 const CHROME_HEIGHT: u32 = 104;
 const HOME_PAGE: &str = "about:aurora";
@@ -985,6 +985,8 @@ impl AuroraApp {
                 });
             }
             let _ = overlay.set_visible(true);
+            #[cfg(windows)]
+            raise_webview(overlay);
             self.update_overlay(true);
         }
     }
@@ -1733,6 +1735,10 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
             UserEvent::OverlayHidden => {
                 if let Some(overlay) = self.overlay.as_ref() {
                     let _ = overlay.set_visible(false);
+                }
+                #[cfg(windows)]
+                if let Some(tab) = self.active_tab_mut() {
+                    raise_webview(&tab.view);
                 }
                 if let Some(chrome) = self.chrome.as_ref() {
                     let _ = chrome.evaluate_script("window.syncMenu(false)");
@@ -2657,6 +2663,28 @@ fn resolve_input(input: &str, search_engine: &str, https_first: bool) -> String 
         } else {
             format!("https://duckduckgo.com/?q={query}")
         }
+    }
+}
+
+#[cfg(windows)]
+fn raise_webview(view: &WebView) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+    };
+
+    // Child WebViews retain their native z-order when hidden. Explicitly raise
+    // the overlay whenever it opens so the page WebView cannot paint over its
+    // card; restore the active page after the overlay closes.
+    unsafe {
+        let _ = SetWindowPos(
+            view.hwnd(),
+            Some(HWND_TOP),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
     }
 }
 
