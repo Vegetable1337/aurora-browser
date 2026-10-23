@@ -1,8 +1,35 @@
-# Windows extension experiment
+# Windows WebView2 extension integration
 
-Aurora remains Rust/Wry/WebView2. This experiment lives in
-`rust-browser/examples/extensions_probe.rs`, separate from the user's browser.
-No extension manager is integrated into the main application yet.
+Aurora remains Rust/Wry/WebView2. The initial native experiment remains
+available in `rust-browser/examples/extensions_probe.rs`; a profile-scoped
+manager is now integrated into the main application's Library menu. Code lives
+in `rust-browser/src/extensions.rs` and the UI in `rust-browser/ui/overlay.html`.
+
+## Main application status
+
+- **Implemented:** separate extension-free WebView2 context for Aurora's toolbar
+  and privileged Library/settings overlay. Ordinary website tabs use a separate
+  context with extensions enabled. Private tabs are created with extensions
+  disabled. Switching/locking drops tabs and the previous profile context.
+- **Implemented:** local folder selection; Manifest V3 metadata validation;
+  bounded copying into profile-owned `Extensions/` storage; rejection of
+  symlinks/reparse points; explicit permission and host-access confirmation;
+  profile-local ID registry; list, enable, disable and remove by exact WebView2
+  extension ID. The UI operations only arrive through the trusted toolbar or
+  extension-free overlay IPC, never through website tabs.
+- **Tested:** manifest v2 rejection and managed-copy independence are unit tests.
+  Main app and the standalone native probe compile on Windows. UI script syntax
+  and all Rust tests passed in the current checkout.
+- **Not yet tested in the main window:** end-to-end install/enable/disable/remove
+  through the manager, hostile content-script attempts against Aurora UI,
+  service-worker termination after profile lock, action popups, and installer
+  runtime compatibility. The 16-check result below belongs to the isolated
+  disposable probe, not the main-app manager.
+- **Unsupported/unverified:** full Chrome API compatibility, Chrome Web Store
+  install/update, Firefox package/API compatibility, per-host runtime permission
+  management, and extension toolbar/action popup integration. Aurora displays
+  permissions declared in the manifest; WebView2 remains responsible for its
+  own API permission enforcement.
 
 ## Reproduce
 
@@ -27,8 +54,8 @@ success title after receiving a valid worker reply. No Aurora IPC is exposed.
 The experiment uses native COM callbacks and the normal Windows message loop;
 it is a real WebView2 execution, not a mocked extension API.
 
-Contrary to the older audit's assumption, Wry 0.57 already exposes environment
-extension enablement and an unpacked-extension path. Management still needs COM:
+Wry 0.57 exposes environment extension enablement and an unpacked-extension
+path. Management uses COM:
 `ICoreWebView2Profile7.AddBrowserExtension/GetBrowserExtensions` and
 `ICoreWebView2BrowserExtension.Enable/Remove`.
 
@@ -46,8 +73,9 @@ the first returned extension. A production manager must use stable extension IDs
 No sandbox-disabling, TLS-bypass or Site-Isolation-disabling flags are added.
 An observed test renderer had none of those flags. This is not proof of its
 Windows token mitigations or a complete sandbox/security audit. Native messaging,
-file access restrictions, hostile extensions and extension access to Aurora's
-privileged UI still require separate verification before integration.
+file access restrictions and hostile extensions still require separate
+verification. Main-app UI separation is implemented but hostile injection has
+not yet been tested end-to-end.
 
 ## Compatibility matrix
 
@@ -73,9 +101,11 @@ only website content environments should enable extensions. Existing overlay
 creation shares a content context, so enabling extensions indiscriminately is
 not a safe integration. Introduce a Windows management adapter with explicit
 profile lifecycle and callbacks, then a permission-review/install flow and
-profile-scoped manager. Local source folders must be copied into a managed,
-validated directory only with user installation consent; arbitrary source-folder
-changes remove a WebView2 extension. Do not expose installation through webpage IPC.
+The integrated manager copies packages into a profile-owned, validated directory
+only after the user selects a folder; it then presents permissions from the
+staged copy for explicit consent. WebView2 does not copy those files itself, so
+the managed files must remain available for as long as the extension is
+installed. Aurora does not expose installation through webpage IPC.
 
 No evidence currently requires a CEF or Chromium migration. Keep that decision
 open until the remaining permissions/UI/API compatibility tests are complete.

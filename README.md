@@ -42,9 +42,10 @@ Aurora — экспериментальный настольный браузе�
 - Защищённые профили Rust с паролем или ключом восстановления, экспортом/восстановлением резервных копий и зашифрованными закладками/журналом Aurora в SQLite.
 - Список посещений, очистка журнала, загрузки в папку Downloads.
 - Страница новой вкладки Aurora, меню библиотеки и настройки темы, поисковика, стартовой страницы и анимаций.
+- Экспериментальный менеджер локальных распакованных расширений Chrome Manifest V3: копирование в отдельное хранилище профиля, просмотр разрешений и установка/включение/отключение/удаление.
 - Логотип Aurora и Windows-иконка приложения.
 
-Rust-версия пока не поддерживает все функции прежнего Python-прототипа: в частности, отдельные приватные окна, управление разрешениями сайтов и блокировку трекеров. Шифрование защищённых профилей покрывает данные Aurora, но не файлы WebView2 (cookies, кэш и другие данные Chromium).
+Расширения используют ограниченную интеграцию WebView2, а не полный API Chrome. Firefox, Chrome Web Store и всплывающие окна действий расширений не поддерживаются или не проверены. Блокировка трекеров и управление разрешениями сайтов в Rust ещё не реализованы. Шифрование защищённых профилей покрывает данные Aurora, но не файлы WebView2, включая cookies, кэш и данные расширений.
 
 ### Запуск Python-версии
 
@@ -126,9 +127,10 @@ Aurora is an experimental Windows desktop browser project focused on privacy and
 - Find-in-page, WebView2 incognito tabs, and password/recovery-key protected Rust profiles with encrypted Aurora bookmarks/history and encrypted backup export/restore.
 - Visit list, history clearing, and downloads to the Downloads folder.
 - Aurora new-tab page, library menu, and settings for theme, search provider, start page, and animations.
+- An experimental manager for local unpacked Chrome Manifest V3 extensions, with a profile-owned copy, a declared-permissions review, and install/enable/disable/remove controls.
 - Aurora logo and Windows application icon.
 
-The Rust version has not yet caught up with the former Python prototype. Separate private windows, website permission management, and tracker blocking are not implemented there. Protected profiles encrypt Aurora-owned bookmarks/history, but not WebView2 profile files such as cookies and cache.
+Extensions use a limited WebView2 integration, not the complete Chrome API. Firefox packages, Chrome Web Store installation, and extension action popups are unsupported or unverified. Tracker blocking and website permission management are not implemented in Rust. Protected profiles encrypt Aurora-owned bookmarks/history, but not WebView2 profile files, including cookies, cache, and extension data.
 
 ### Run the Python version
 
@@ -210,9 +212,10 @@ Aurora 是一个面向 Windows 的实验性桌面浏览器项目，注重隐私�
 - 页面内查找、WebView2 隐身标签页，以及使用密码或恢复密钥保护的 Rust 配置文件（Aurora 书签/历史记录加密，并支持加密备份导出与恢复）。
 - 访问记录、清除历史，以及下载到 Downloads 文件夹。
 - Aurora 新标签页、资料库菜单，以及主题、搜索引擎、起始页和动画设置。
+- 实验性的 Chrome Manifest V3 本地解压扩展管理器：复制到当前配置文件的独立目录、安装前显示声明的权限，并支持启用、停用和移除。
 - Aurora 标志和 Windows 应用图标。
 
-Rust 版本尚未实现旧版 Python 原型的全部功能。目前仍不支持独立隐身窗口、网站权限管理和跟踪器拦截。受保护配置文件仅加密 Aurora 书签和历史记录，不加密 WebView2 配置文件中的 Cookie、缓存等数据。
+扩展功能是有限的 WebView2 集成，并不等于完整 Chrome API。Firefox 扩展、Chrome 网上应用店安装和扩展操作弹窗尚不支持或未验证。Rust 版尚未实现跟踪器拦截和网站权限管理。受保护配置文件仅加密 Aurora 书签和历史记录，不加密 WebView2 数据，包括 Cookie、缓存和扩展数据。
 
 ### 运行 Python 版本
 

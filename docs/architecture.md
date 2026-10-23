@@ -1,38 +1,27 @@
-# Architecture decision record: initial browser engine
+# Aurora architecture
 
-> Historical Python/Qt architecture. Aurora's primary application now uses
-> Rust/Wry/WebView2 on Windows. See [the current P0 audit](p0-audit.md) for the
-> current implementation, security gaps and extension investigation.
+## Current primary application
 
-**Status:** Accepted for the initial Windows alpha; reassess before production hardening.
+The Windows desktop browser is implemented in Rust with Wry and the installed Microsoft Edge WebView2 Runtime. The older Python/Qt application is retained as a reference and is not the primary executable. Aurora does not build or bundle Chromium.
 
-## Context
+The main process owns the native window, toolbar, browser tabs, profile switching and privileged UI commands. Each ordinary profile has a distinct WebView2 user-data directory. Web pages use a persistent WebView2 context; private tabs use WebView2 incognito mode. Profile locking drops the current tabs and context before activating the default profile.
 
-Aurora needs a real Chromium renderer and a portable native interface. The development machine is Windows 10 x64. Python 3.15 was installed initially; packaging verification later used a separate Python 3.13 environment.
+The privileged toolbar and library/settings/extension-manager overlay use their own persistent WebView2 context with extensions disabled. Website tabs use a separate context with WebView2 extensions enabled. This separation is required because content scripts execute in the browser context and must not be able to reach Aurora's privileged IPC surface. Both privileged WebViews accept navigation only to their compiled-in HTML payload and reject popups.
 
-## Decision
+## Extension management
 
-Use Qt 6 / Qt WebEngine for the browser engine integration and Qt Widgets for the first interface. The executable is currently Python using the official PySide6 bindings, with the browser surface provided by Qt WebEngine's Chromium build. Keep browser-specific UI and profile code in the application layer so security-sensitive components can be moved to native C++ or Rust if needed.
+On Windows, Aurora supports local unpacked Chrome Manifest V3 packages through WebView2's profile extension APIs. The manager stages a bounded copy in the current profile's `Extensions` directory, presents the copied manifest's API and host permissions for explicit confirmation, and then calls `ICoreWebView2Profile7.AddBrowserExtension`. Management operations match the WebView2 extension ID against an Aurora-owned per-profile registry before enabling or removing it. Normal profiles have separate WebView2 directories and extension state; private tabs do not load extensions.
 
-Qt WebEngine is cross-platform across Windows, macOS, and Linux. Current Qt API documentation lists `QWebEngineExtensionManager` for loading Chrome extensions from the filesystem. This is a capability to evaluate, not evidence of complete Chrome or Firefox compatibility. Aurora's extension integration remains unimplemented.
+This is a limited WebView2 integration, not Chrome or Firefox compatibility. WebView2 lacks Chrome's browser chrome integration (for example, a full extension toolbar/action popup experience) and exposes no Aurora implementation of every Chrome permission/API. Firefox packages and Firefox-specific APIs are not supported. Do not install untrusted extensions. Aurora's UI lists permissions declared in the manifest; it does not mediate every runtime API request or replace the engine's own extension permission checks.
 
-## Alternatives considered
+See [the implementation and test status](extensions-prototype.md). The native probe exercises service workers, content scripts, messaging, storage persistence and cross-profile isolation, while the main application manager has compile/unit coverage. Full extension-manager lifecycle tests against real Aurora windows, hostile extension tests, popup/action behavior and operating-system sandbox verification remain outstanding.
 
-- **CEF:** mature Chromium embedding with native C++ integration, but does not provide full Chrome extension support out of the box and requires a maintained native integration/build pipeline. It is a reasonable fallback if Qt WebEngine's extension and security constraints prove insufficient.
-- **A maintained Chromium fork:** gives the greatest control over browser behavior and extension parity, but requires a large ongoing Chromium merge, build, and security response operation. That infrastructure is absent, so it is not appropriate for the initial executable milestone.
-- **Microsoft WebView2:** immediately available on this Windows machine and Chromium-based, but Windows-specific, and not a good cross-platform foundation for the stated scope.
+## Data protection boundary
 
-## Browser source projects consulted
+Protected Aurora profiles encrypt Aurora-owned bookmarks and visit records. WebView2 stores cookies, cache, site data, extension data and other Chromium profile state in separate profile directories that are not encrypted by Aurora. The `Extensions` source copy and its permission registry are also ordinary files under that profile directory. This architecture must not be described as whole-profile encryption.
 
-- **Brave adblock-rust** is integrated as a dependency through the community Python bindings (`adblock==0.6.0`). Aurora expresses its existing bundled tracker host set as standard ABP rules and passes Chromium request URLs, first-party URLs, and resource types to this engine. The Rust engine is MPL-2.0; the Python bindings are MIT OR Apache-2.0. See `docs/third-party-sources.md` for links and scope. The Python bindings are an older release, so upgrading them and validating the Windows package is required before shipping broadly.
-- **qutebrowser** is a Python/Qt WebEngine browser consulted as an architectural reference for keeping browser behavior in the Qt integration layer. No qutebrowser source code was copied; its GPL-3.0-or-later license is therefore not added to Aurora by this work.
-- **Chromium** is the embedded browser engine supplied by Qt WebEngine. Aurora does not contain or build the Chromium source tree itself.
+Profile switching destroys Aurora's tab views and drops the old context before replacing the active vault. This prevents a later Aurora IPC command from targeting the old active tab. It does not prove that every WebView2 extension service worker or renderer process has terminated, nor does it guarantee secure erasure from memory, swap or disk.
 
-## Consequences
+## Other engine options
 
-- We can ship a cross-platform UI and embedded Chromium without maintaining a Chromium fork.
-- Qt owns the Chromium integration layer and release cadence; Aurora must monitor and update Qt promptly.
-- Qt WebEngine is not the same product/runtime as Google Chrome. Extension API coverage, service worker behavior, profile storage encryption, and Chromium command-line policy need independent validation.
-- Python is suitable for the alpha UI but not yet an established packaging or security boundary. A production build needs a pinned, reproducible native build and signed distribution pipeline.
-- Password-protected profiles connect the key-vault to bookmark records and use separate Qt WebEngine profile directories. Qt's persistent profile directories remain ordinary on-disk Chromium data.
-- A Windows folder build succeeds with Python 3.13 and Nuitka 4.3.1. Its packaged smoke mode loads a local HTML page in Qt WebEngine and exits successfully. PyInstaller builds failed during `PySide6.QtCore` import, so the documented script uses Nuitka. The output is a portable folder, not a signed installer; updates are not implemented.
+No migration to CEF or a Chromium fork is approved or required by current evidence. Reconsider only if a documented WebView2 limitation blocks a required, security-relevant feature and a tested prototype establishes the alternative's behavior, maintenance cost and update model.

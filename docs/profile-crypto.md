@@ -10,12 +10,13 @@ Encrypted exports use a separate backup password, Argon2id and AES-256-GCM aroun
 
 The Python browser exposes a Profiles menu to create, unlock, recover, switch, lock, change the password for, and delete password-protected profiles. The Rust browser has a corresponding menu and a Rust vault implementation, including encrypted backup export/restore. Each protected browser profile gets a separate engine data directory. Protected-profile bookmarks and Aurora history use encrypted records; URL-derived record IDs use a profile-keyed HMAC so bookmark URLs are not exposed by SQLite row IDs. Profile display names remain plaintext in `profile.json` so Aurora can show them while locked.
 
-The vault API's `lock()` zeroes the module's mutable PMK buffer and blocks later API access through that vault object. When switching or locking, Aurora stops and destroys its tabs before disposing the Qt profile object and locking the vault. Python, the crypto library, Chromium, the OS, and other copies may retain key material in memory; this is not secure erasure.
+The vault API's `lock()` zeroes the module's mutable PMK buffer and blocks later API access through that vault object. The Rust browser destroys its tabs and drops the WebView2 profile context when switching or locking. Python, the crypto library, WebView2, the OS, and other copies may retain key material in memory; this is not secure erasure. Profile-lock termination of extension service workers has not been verified.
 
 ## What is not implemented
 
 - The `Default` profile and its bookmarks remain unprotected. Existing default-profile bookmarks are not migrated automatically.
 - Password-protected profiles isolate Chromium cookies, cache, history, local storage, and related engine files in separate directories, but those files remain plaintext at rest. This includes saved website credentials and permissions managed by Chromium.
+- WebView2 extension service-worker state, `chrome.storage`, managed extension source copies, and Aurora's extension registry are also ordinary files inside the WebView2 profile directory; they are not encrypted by the vault.
 - Bookmarks and Aurora's own visit list in a password-protected profile are encrypted through the vault. Chromium's separate history data remains plaintext. Profile display names, record categories, and random-looking HMAC identifiers remain visible as metadata.
 - A profile lock closes its tabs and revokes this application's vault API access. It does not encrypt Chromium files on disk, guarantee renderer-process termination, or erase plaintext from RAM, swap, or system caches.
 - Export/import is available in the vault API only; the browser UI does not yet expose backup or restore.

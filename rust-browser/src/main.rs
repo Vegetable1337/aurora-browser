@@ -1,3 +1,4 @@
+pub mod extensions;
 pub mod vault;
 
 use serde::{Deserialize, Serialize};
@@ -9,6 +10,8 @@ use winit::{
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     window::{Icon, Window, WindowId},
 };
+#[cfg(windows)]
+use wry::WebViewBuilderExtWindows;
 use wry::{PageLoadEvent, PermissionResponse, Rect, WebView, WebViewBuilder, dpi::LogicalPosition};
 
 const CHROME_HEIGHT: u32 = 104;
@@ -30,6 +33,10 @@ enum UserEvent {
     MenuOpen(bool),
     OverlayHidden,
     OverlayReady,
+    ExtensionsListed(Result<Vec<extensions::ExtensionInfo>, String>),
+    ExtensionChanged(Result<(), String>),
+    ExtensionInstalled(Result<extensions::ExtensionInfo, String>),
+    ExtensionPrepared(Result<(PathBuf, extensions::ExtensionManifest, PathBuf), String>),
 }
 
 struct BrowserTab {
@@ -74,6 +81,292 @@ impl Default for BrowserSettings {
 }
 
 impl AuroraApp {
+    #[cfg(not(windows))]
+    fn show_extension_error(&self, error: &str) {
+        if let (Some(overlay), Ok(message)) = (self.overlay.as_ref(), serde_json::to_string(error))
+        {
+            let _ = overlay.evaluate_script(&format!("window.showExtensionError({message})"));
+        }
+    }
+
+    #[cfg(windows)]
+    fn confirm_extension_permissions(
+        &self,
+        directory: &std::path::Path,
+        manifest: &extensions::ExtensionManifest,
+    ) -> bool {
+        let permissions = manifest
+            .permissions
+            .iter()
+            .chain(manifest.optional_permissions.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        let hosts = manifest
+            .host_permissions
+            .iter()
+            .chain(manifest.optional_host_permissions.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut review = format!(
+            "Название: {}\nВерсия: {}\n\nРазрешения API:\n{}\n\nДоступ к сайтам:\n{}\n\nУстанавливайте только расширения, которым доверяете.",
+            manifest.name,
+            manifest.version,
+            if permissions.is_empty() {
+                "нет".into()
+            } else {
+                permissions.join(", ")
+            },
+            if hosts.is_empty() {
+                "нет".into()
+            } else {
+                hosts.join("\n")
+            }
+        );
+        if !manifest.description.is_empty() {
+            review = format!("{}\n\n{}", manifest.description, review);
+        }
+        let Some(window) = self.window.as_ref() else {
+            let _ = fs::remove_dir_all(directory);
+            return false;
+        };
+        let answer = rfd::MessageDialog::new()
+            .set_title("Проверка разрешений расширения")
+            .set_description(review)
+            .set_level(rfd::MessageLevel::Warning)
+            .set_buttons(rfd::MessageButtons::OkCancel)
+            .set_parent(window)
+            .show();
+        let approved = matches!(
+            answer,
+            rfd::MessageDialogResult::Ok | rfd::MessageDialogResult::Yes
+        );
+        if !approved {
+            let _ = fs::remove_dir_all(directory);
+        }
+        approved
+    }
+
+    #[cfg(windows)]
+    fn extension_paths(&self) -> Option<(PathBuf, PathBuf)> {
+        let profile_dir = self.context.as_ref()?.data_directory()?.to_path_buf();
+        Some((
+            profile_dir.join("Extensions"),
+            profile_dir.join("aurora-extensions.json"),
+        ))
+    }
+
+    #[cfg(windows)]
+    fn request_extensions(&mut self) {
+        let Some(id) = self.active_tab else {
+            return;
+        };
+        if self
+            .tabs
+            .iter()
+            .find(|tab| tab.id == id)
+            .is_some_and(|tab| tab.is_private)
+        {
+            if let Some(overlay) = self.overlay.as_ref() {
+                let _ = overlay.evaluate_script("window.showExtensionError('Менеджер расширений недоступен в приватной вкладке')");
+            }
+            return;
+        }
+        let Some((_, registry)) = self.extension_paths() else {
+            return;
+        };
+        let Some(view) = self
+            .tabs
+            .iter()
+            .find(|tab| tab.id == id)
+            .map(|tab| &tab.view)
+        else {
+            return;
+        };
+        let proxy = self.proxy.as_ref().expect("event loop proxy").clone();
+        if let Err(error) = extensions::list_extensions(view, registry, move |result| {
+            let _ = proxy.send_event(UserEvent::ExtensionsListed(result));
+        }) {
+            if let Some(overlay) = self.overlay.as_ref() {
+                let message = serde_json::to_string(&error)
+                    .unwrap_or_else(|_| "\"Не удалось получить список расширений\"".into());
+                let _ = overlay.evaluate_script(&format!("window.showExtensionError({message})"));
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    fn set_extension_enabled(&mut self, id: &str, enabled: bool) {
+        let Some(tab_id) = self.active_tab else {
+            return;
+        };
+        if self
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .is_some_and(|tab| tab.is_private)
+        {
+            return;
+        }
+        let Some((_, registry)) = self.extension_paths() else {
+            return;
+        };
+        let Some(view) = self
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .map(|tab| &tab.view)
+        else {
+            return;
+        };
+        let proxy = self.proxy.as_ref().expect("event loop proxy").clone();
+        if let Err(error) = extensions::set_extension_enabled(
+            view,
+            registry,
+            id.to_owned(),
+            enabled,
+            move |result| {
+                let _ = proxy.send_event(UserEvent::ExtensionChanged(result));
+            },
+        ) {
+            let message = serde_json::to_string(&error)
+                .unwrap_or_else(|_| "\"Не удалось изменить расширение\"".into());
+            if let Some(overlay) = self.overlay.as_ref() {
+                let _ = overlay.evaluate_script(&format!("window.showExtensionError({message})"));
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    fn remove_extension(&mut self, id: &str) {
+        let Some(tab_id) = self.active_tab else {
+            return;
+        };
+        if self
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .is_some_and(|tab| tab.is_private)
+        {
+            return;
+        }
+        let Some((_, registry)) = self.extension_paths() else {
+            return;
+        };
+        let Some(view) = self
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .map(|tab| &tab.view)
+        else {
+            return;
+        };
+        let proxy = self.proxy.as_ref().expect("event loop proxy").clone();
+        if let Err(error) =
+            extensions::remove_extension(view, registry, id.to_owned(), move |result| {
+                let _ = proxy.send_event(UserEvent::ExtensionChanged(result));
+            })
+        {
+            let message = serde_json::to_string(&error)
+                .unwrap_or_else(|_| "\"Не удалось удалить расширение\"".into());
+            if let Some(overlay) = self.overlay.as_ref() {
+                let _ = overlay.evaluate_script(&format!("window.showExtensionError({message})"));
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    fn install_extension_from_folder(&mut self) {
+        let active_tab = self
+            .active_tab
+            .and_then(|id| self.tabs.iter().find(|tab| tab.id == id));
+        if !active_tab.is_some_and(|tab| !tab.is_private) {
+            if let Some(overlay) = self.overlay.as_ref() {
+                let _ = overlay.evaluate_script(
+                    "window.showExtensionError('Откройте обычную вкладку для управления расширениями')",
+                );
+            }
+            return;
+        }
+        let Some((managed_root, _)) = self.extension_paths() else {
+            return;
+        };
+        let Some(profile_dir) = self
+            .context
+            .as_ref()
+            .and_then(|context| context.data_directory())
+            .map(PathBuf::from)
+        else {
+            return;
+        };
+        let Some(source) = rfd::FileDialog::new()
+            .set_title("Выберите распакованное расширение MV3")
+            .pick_folder()
+        else {
+            return;
+        };
+        let proxy = self.proxy.as_ref().expect("event loop proxy").clone();
+        std::thread::spawn(move || {
+            let result = extensions::stage_package(&source, &managed_root)
+                .and_then(|directory| {
+                    extensions::read_manifest(&directory)
+                        .map(|manifest| (directory, manifest, profile_dir))
+                })
+                .map_err(|error| error.to_string());
+            let _ = proxy.send_event(UserEvent::ExtensionPrepared(result));
+        });
+    }
+
+    #[cfg(windows)]
+    fn install_prepared_extension(
+        &mut self,
+        directory: PathBuf,
+        manifest: extensions::ExtensionManifest,
+    ) {
+        let Some(tab_id) = self.active_tab else {
+            let _ = fs::remove_dir_all(directory);
+            return;
+        };
+        if self
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .is_some_and(|tab| tab.is_private)
+        {
+            let _ = fs::remove_dir_all(directory);
+            return;
+        }
+        let Some((_, registry)) = self.extension_paths() else {
+            let _ = fs::remove_dir_all(directory);
+            return;
+        };
+        let Some(view) = self
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .map(|tab| &tab.view)
+        else {
+            let _ = fs::remove_dir_all(directory);
+            return;
+        };
+        let proxy = self.proxy.as_ref().expect("event loop proxy").clone();
+        if let Err(error) = extensions::install_extension(
+            view,
+            directory.clone(),
+            registry,
+            manifest,
+            move |result| {
+                let _ = proxy.send_event(UserEvent::ExtensionInstalled(result));
+            },
+        ) {
+            let _ = fs::remove_dir_all(directory);
+            let message = serde_json::to_string(&error)
+                .unwrap_or_else(|_| "\"Не удалось установить расширение\"".into());
+            if let Some(overlay) = self.overlay.as_ref() {
+                let _ = overlay.evaluate_script(&format!("window.showExtensionError({message})"));
+            }
+        }
+    }
+
     fn find_in_active_tab(&mut self, backwards: bool) {
         let Ok(query) = serde_json::to_string(&self.find_query) else {
             return;
@@ -173,6 +466,8 @@ impl AuroraApp {
                     let _ = load_proxy.send_event(UserEvent::PageLoaded(id, url));
                 }
             });
+        #[cfg(windows)]
+        let builder = builder.with_browser_extensions_enabled(!is_private);
         let view = builder
             .build_as_child(window)
             .expect("create Chromium page view");
@@ -341,7 +636,7 @@ impl AuroraApp {
 
     fn open_overlay(&mut self) {
         if self.overlay.is_none() {
-            let (Some(window), Some(context)) = (self.window.as_ref(), self.context.as_mut())
+            let (Some(window), Some(context)) = (self.window.as_ref(), self.ui_context.as_mut())
             else {
                 return;
             };
@@ -473,6 +768,7 @@ struct AuroraApp {
     active_tab: Option<u64>,
     next_tab_id: u64,
     context: Option<wry::WebContext>,
+    ui_context: Option<wry::WebContext>,
     proxy: Option<EventLoopProxy<UserEvent>>,
     bookmarks: Option<Vec<Bookmark>>,
     bookmarks_path: Option<PathBuf>,
@@ -511,7 +807,16 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
             .expect("event loop proxy is initialized")
             .clone();
 
-        let chrome = WebViewBuilder::new()
+        let ui_dir = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("Aurora")
+            .join("Rust")
+            .join("PrivilegedUI");
+        fs::create_dir_all(&ui_dir).expect("create privileged UI profile directory");
+        let mut ui_context = wry::WebContext::new(Some(ui_dir));
+        let chrome = WebViewBuilder::new_with_web_context(&mut ui_context)
+            .with_browser_extensions_enabled(false)
             .with_html(CHROME_HTML)
             .with_navigation_handler(|url| is_trusted_ui_navigation(&url, CHROME_HTML))
             .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
@@ -569,6 +874,7 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
         self.default_data_dir = Some(data_dir.clone());
         self.chrome = Some(chrome);
         self.window = Some(window);
+        self.ui_context = Some(ui_context);
         self.context = Some(context);
         self.create_tab(HOME_PAGE);
         let timeout_proxy = self.proxy.as_ref().expect("event loop proxy").clone();
@@ -604,6 +910,83 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                 }
             }
             UserEvent::OverlayReady => self.update_overlay(true),
+            UserEvent::ExtensionsListed(result) => {
+                if let Some(overlay) = self.overlay.as_ref() {
+                    match result {
+                        Ok(extensions) => {
+                            let json =
+                                serde_json::to_string(&extensions).unwrap_or_else(|_| "[]".into());
+                            let _ =
+                                overlay.evaluate_script(&format!("window.setExtensions({json})"));
+                        }
+                        Err(error) => {
+                            let message = serde_json::to_string(&error).unwrap_or_else(|_| {
+                                "\"Не удалось получить список расширений\"".into()
+                            });
+                            let _ = overlay
+                                .evaluate_script(&format!("window.showExtensionError({message})"));
+                        }
+                    }
+                }
+            }
+            UserEvent::ExtensionChanged(result) => {
+                if let Some(overlay) = self.overlay.as_ref() {
+                    match result {
+                        Ok(()) => {
+                            let _ = overlay.evaluate_script("window.showExtensionToast('Изменения сохранены'); window.requestExtensions()");
+                        }
+                        Err(error) => {
+                            let message = serde_json::to_string(&error)
+                                .unwrap_or_else(|_| "\"Не удалось изменить расширение\"".into());
+                            let _ = overlay
+                                .evaluate_script(&format!("window.showExtensionError({message})"));
+                        }
+                    }
+                }
+            }
+            UserEvent::ExtensionInstalled(result) => {
+                if let Some(overlay) = self.overlay.as_ref() {
+                    match result {
+                        Ok(_) => {
+                            let _ = overlay.evaluate_script("window.showExtensionToast('Расширение установлено'); window.requestExtensions()");
+                        }
+                        Err(error) => {
+                            let message = serde_json::to_string(&error)
+                                .unwrap_or_else(|_| "\"Не удалось установить расширение\"".into());
+                            let _ = overlay
+                                .evaluate_script(&format!("window.showExtensionError({message})"));
+                        }
+                    }
+                }
+            }
+            UserEvent::ExtensionPrepared(result) => match result {
+                Ok((directory, manifest, prepared_profile)) => {
+                    let active_profile = self
+                        .context
+                        .as_ref()
+                        .and_then(|context| context.data_directory());
+                    if active_profile == Some(prepared_profile.as_path())
+                        && !self
+                            .active_tab
+                            .and_then(|id| self.tabs.iter().find(|tab| tab.id == id))
+                            .is_some_and(|tab| tab.is_private)
+                        && self.confirm_extension_permissions(&directory, &manifest)
+                    {
+                        self.install_prepared_extension(directory, manifest);
+                    } else {
+                        let _ = fs::remove_dir_all(directory);
+                    }
+                }
+                Err(error) => {
+                    if let Some(overlay) = self.overlay.as_ref() {
+                        let message = serde_json::to_string(&error).unwrap_or_else(|_| {
+                            "\"Не удалось подготовить пакет расширения\"".into()
+                        });
+                        let _ = overlay
+                            .evaluate_script(&format!("window.showExtensionError({message})"));
+                    }
+                }
+            },
             UserEvent::PageLoading(id, loading) => {
                 if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) {
                     tab.is_loading = loading;
@@ -820,6 +1203,33 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                         }
                         self.update_overlay(false);
                     }
+                }
+                "extensions_open" | "extensions_list" => {
+                    #[cfg(windows)]
+                    self.request_extensions();
+                    #[cfg(not(windows))]
+                    self.show_extension_error(
+                        "Управление расширениями пока доступно только в Windows/WebView2",
+                    );
+                }
+                "extensions_install" => {
+                    #[cfg(windows)]
+                    self.install_extension_from_folder();
+                    #[cfg(not(windows))]
+                    self.show_extension_error(
+                        "Установка расширений пока доступна только в Windows/WebView2",
+                    );
+                }
+                "extensions_enable" | "extensions_disable" => {
+                    #[cfg(windows)]
+                    self.set_extension_enabled(
+                        command.value.as_deref().unwrap_or(""),
+                        command.action == "extensions_enable",
+                    );
+                }
+                "extensions_remove" => {
+                    #[cfg(windows)]
+                    self.remove_extension(command.value.as_deref().unwrap_or(""));
                 }
                 "bookmark" => self.save_bookmark(),
                 "clear_history" => {

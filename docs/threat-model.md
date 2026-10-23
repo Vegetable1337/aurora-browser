@@ -1,36 +1,33 @@
-# Initial threat model and known gaps
+# Aurora threat model and known gaps
 
-> This document describes the legacy Python/Qt implementation. Current Rust
-> boundaries and unverified security properties are recorded in
-> [the P0 audit](p0-audit.md). Python protections must not be assumed to exist in Rust.
+## Scope
 
-## Intended scope
+Aurora's primary application is a Windows Rust/Wry shell around the system Microsoft Edge WebView2 Runtime. This document describes implemented boundaries and open work; it is not a security certification.
 
-This Windows alpha renders websites using Qt WebEngine/Chromium and supports tabs, navigation, search, bookmarks, recent visits, downloads, private windows, and password-protected profiles. It has basic website permission prompts, but it is not yet a privacy-hardened daily browser.
+## Implemented boundaries
 
-## Security properties inherited from the engine
+- Website tabs do not receive Aurora's toolbar or overlay IPC handler. The privileged toolbar and library/settings/extension-manager overlay are separate WebView2 views in a context with extensions disabled.
+- Privileged UI navigation is restricted to the exact compiled-in HTML document; popups are denied.
+- Ordinary profiles use separate WebView2 user-data directories. Private tabs use WebView2's incognito mode and do not enter Aurora's visit history.
+- Local unpacked Manifest V3 extensions are copied into profile-owned storage, and requested manifest permissions are displayed before installation. Enable/remove operations are restricted to stable IDs in Aurora's profile registry.
+- The extension source copy is capped at 20,000 files and 256 MiB. Symlinks/reparse points and non-file filesystem objects are rejected.
+- Aurora does not add Chromium command-line switches intended to disable sandboxing, TLS checks or site isolation. This code review does not verify the effective WebView2 process mitigations or sandbox token.
 
-Aurora does not add Chromium command-line switches that disable sandboxing, certificate verification, or site isolation. The embedded runtime's actual sandbox behavior depends on the bundled Qt/Chromium build and platform; it still needs verification in packaged Windows, macOS, and Linux builds. This statement is not a claim that Aurora has completed a sandbox audit.
+## Data and extension risks
 
-## Data and threats
+- Protected profiles encrypt Aurora-owned bookmark and visit records. WebView2 cookies, cache, history, local storage, IndexedDB, credentials, permissions and extension storage remain WebView2-managed data on disk and are not encrypted by Aurora.
+- Managed extension source files and the extension ID/permission registry are not encrypted. The profile owner or malware running as that user can modify them.
+- The permission confirmation displays the manifest's declared API and host permissions. Aurora does not implement a complete Chrome permission broker, optional-host-permission prompt flow, or per-host runtime permission editor.
+- WebView2 extension APIs provide a subset and a different browser UI from Chrome. Extension action popups and complete Chrome Web Store behavior are not supported or claimed. Firefox packages and Firefox-specific API coverage are not tested.
+- Dropping the profile's WebView2 views/context closes Aurora's tab handles. Whether all extension service workers and renderer processes have stopped at profile lock is not verified.
+- There is no Rust ad/tracker filter yet. HTTPS-first, third-party-cookie controls, DNS-over-HTTPS configuration, WebRTC controls, fingerprinting defenses and site permission management are not implemented in the Rust app.
+- Downloads are saved outside encrypted Aurora storage. The ordinary profile is not password-locked.
+- There is no Aurora telemetry/account sync service or automatic application updater. Web pages make their own network requests and can identify users through normal web mechanisms.
 
-- Persistent cookies, cache, local storage and other Chromium profile data are kept under `%LOCALAPPDATA%\Aurora\Default` without Aurora application-layer encryption.
-- Aurora supports password-protected profiles with separate Chromium data directories and an encrypted store for bookmarks and Aurora's own visit list. The `Default` profile remains unprotected.
-- In a protected profile, cookies, history, cache, local storage, saved website credentials, permissions and other Chromium-managed files are still plaintext at rest. Profile isolation separates directories; it does not encrypt them.
-- Protected-profile bookmark and Aurora visit-list values are encrypted, and URLs are not used directly as SQLite record IDs. Profile display names and basic record metadata remain visible.
-- Locking destroys Aurora's active tabs and Qt profile object, then clears its vault buffer. It cannot promise renderer exit, key erasure from RAM/swap, or encrypted Chromium files. Do not treat Aurora as a whole-profile encrypted product.
-- Downloads are written to a user-selected location and are outside the profile directory; Aurora does not encrypt them.
-- Private windows use an off-the-record Qt WebEngine profile with memory-only HTTP cache, non-persistent cookies, and no Aurora visit-list writes. User-selected downloads remain on disk, and websites/network providers still observe connections.
-- Supported website permission requests are prompted in the UI and decisions are held in memory for the active profile session. No dedicated permission-management screen is implemented.
-- A small built-in host list blocks some known tracking domains through Qt WebEngine's request interceptor. It is not a full EasyList/EasyPrivacy filter engine, has no automatic updates, and can break features on affected sites. It can be disabled in the Privacy menu.
-- Session cookies are not forced onto disk for crash recovery. No third-party-cookie restriction, secure DNS controls, or fingerprinting protections have been implemented.
-- No telemetry or Aurora account service is implemented by the app. Web pages still make their own network requests.
-- No automatic updater or release signature verification is implemented.
+## Claims Aurora does not make
 
-## Claims we do not make
+Aurora does not promise anonymity, whole-profile encryption, secure erasure, full Chrome/Firefox extension compatibility, complete tracker blocking, or protection from a compromised operating-system account, malicious website, malicious extension, or vulnerable WebView2 runtime.
 
-Aurora does not promise anonymity, full profile encryption, secure erasure, extension compatibility, or protection from a compromised OS account, malicious website, compromised Qt/Chromium dependency, or malicious browser extension.
+## Verification still required
 
-## Work required before sensitive use
-
-Encrypt or remove Chromium-managed storage at rest; audit all profile and auxiliary storage paths; isolate profile processes and extension state; adopt and update a complete, tested filter-list engine and third-party-cookie controls; verify sandbox and site isolation in packaged builds; establish signed, promptly updated releases; and complete threat-model review and security regression testing.
+Run the extension lifecycle against the main Aurora window, verify the toolbar and overlay remain free of extension injection using hostile test packages, inspect WebView2 process mitigations in packaged builds, and test behavior after locking/switching profiles. Integrate a maintained request-filtering engine and independently measure which WebView2 request types it can observe. Review and test all data paths before describing protected profiles as encrypted browser profiles.
