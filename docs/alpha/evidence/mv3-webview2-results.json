@@ -1,0 +1,114 @@
+[
+  {
+    "profile": "A",
+    "output": "installed\nWebView2 runtime: 155.0.4283.62\nProbe navigation started: about:blank\nProbe navigation finished: about:blank\n",
+    "exit": 0,
+    "operation": "install",
+    "passed": true
+  },
+  {
+    "profile": "A",
+    "output": "fixture_count=1 enabled=true\nWebView2 runtime: 155.0.4283.62\nExtension: Microsoft Clipboard Extension\nExtension: Aurora MV3 local probe\nExtension: Microsoft Edge PDF Viewer\nProbe navigation started: about:blank\nProbe navigation finished: about:blank\n",
+    "exit": 0,
+    "operation": "list",
+    "passed": true
+  },
+  {
+    "profile": "A",
+    "output": "{\"worker\":true,\"visits\":1,\"id\":\"gnfcgjdnahjpabmoefljdbedgcfbncbj\",\"cookiesDenied\":true}\nWebView2 runtime: 155.0.4283.62\nMV3 fixture enabled before navigation: true\nProbe navigation started: about:blank\nProbe navigation finished: about:blank\nProbe navigation started: http://127.0.0.1:61638/probe\nProbe document title changed: \"Aurora probe waiting\"\nProbe navigation finished: http://127.0.0.1:61638/probe\nProbe document title changed: \"AURORA_MV3_OK:{\\\"worker\\\":true,\\\"visits\\\":1,\\\"id\\\":\\\"gnfcgjdnahjpabmoefljdbedgcfbncbj\\\",\\\"cookiesDenied\\\":true}\"\n",
+    "exit": 0,
+    "operation": "probe",
+    "passed": true
+  },
+  {
+    "profile": "A",
+    "output": "{\"worker\":true,\"visits\":2,\"id\":\"gnfcgjdnahjpabmoefljdbedgcfbncbj\",\"cookiesDenied\":true}\nWebView2 runtime: 155.0.4283.62\nMV3 fixture enabled before navigation: true\nProbe navigation started: about:blank\nProbe navigation finished: about:blank\nProbe navigation started: http://127.0.0.1:61646/probe\nProbe document title changed: \"Aurora probe waiting\"\nProbe navigation finished: http://127.0.0.1:61646/probe\nProbe document title changed: \"AURORA_MV3_OK:{\\\"worker\\\":true,\\\"visits\\\":2,\\\"id\\\":\\\"gnfcgjdnahjpabmoefljdbedgcfbncbj\\\",\\\"cookiesDenied\\\":true}\"\n",
+    "exit": 0,
+    "operation": "probe",
+    "passed": true
+  },
+  {
+    "profile": "B",
+    "output": "fixture_count=0 enabled=false\nWebView2 runtime: 155.0.4283.62\nExtension: Microsoft Clipboard Extension\nExtension: Microsoft Edge PDF Viewer\n",
+    "exit": 0,
+    "operation": "list",
+    "passed": true
+  },
+  {
+    "profile": "B",
+    "output": "installed\nWebView2 runtime: 155.0.4283.62\nProbe navigation started: about:blank\nProbe navigation finished: about:blank\n",
+    "exit": 0,
+    "operation": "install",
+    "passed": true
+  },
+  {
+    "profile": "B",
+    "output": "{\"worker\":true,\"visits\":1,\"id\":\"gnfcgjdnahjpabmoefljdbedgcfbncbj\",\"cookiesDenied\":true}\nWebView2 runtime: 155.0.4283.62\nMV3 fixture enabled before navigation: true\nProbe navigation started: about:blank\nProbe navigation finished: about:blank\nProbe navigation started: http://127.0.0.1:61656/probe\nProbe document title changed: \"Aurora probe waiting\"\nProbe navigation finished: http://127.0.0.1:61656/probe\nProbe document title changed: \"AURORA_MV3_OK:{\\\"worker\\\":true,\\\"visits\\\":1,\\\"id\\\":\\\"gnfcgjdnahjpabmoefljdbedgcfbncbj\\\",\\\"cookiesDenied\\\":true}\"\n",
+    "exit": 0,
+    "operation": "probe",
+    "passed": true
+  },
+  {
+    "profile": "A",
+    "output": "enabled=false\nWebView2 runtime: 155.0.4283.62\nExtension: Microsoft Clipboard Extension\nExtension: Aurora MV3 local probe\nExtension: Microsoft Edge PDF Viewer\n",
+    "exit": 0,
+    "operation": "disable",
+    "passed": true
+  },
+  {
+    "profile": "A",
+    "output": "fixture_count=1 enabled=false\nWebView2 runtime: 155.0.4283.62\nExtension: Microsoft Clipboard Extension\nExtension: Aurora MV3 local probe\nExtension: Microsoft Edge PDF Viewer\n",
+    "exit": 0,
+    "operation": "list",
+    "passed": true
+  },
+  {
+    "profile": "B",
+    "output": "{\"worker\":true,\"visits\":2,\"id\":\"gnfcgjdnahjpabmoefljdbedgcfbncbj\",\"cookiesDenied\":true}\nWebView2 runtime: 155.0.4283.62\nMV3 fixture enabled before navigation: true\nProbe navigation started: about:blank\nProbe navigation finished: about:blank\nProbe navigation started: http://127.0.0.1:61671/probe\nProbe document title changed: \"Aurora probe waiting\"\nProbe navigation finished: http://127.0.0.1:61671/probe\nProbe document title changed: \"AURORA_MV3_OK:{\\\"worker\\\":true,\\\"visits\\\":2,\\\"id\\\":\\\"gnfcgjdnahjpabmoefljdbedgcfbncbj\\\",\\\"cookiesDenied\\\":true}\"\n",
+    "exit": 0,
+    "operation": "probe",
+    "passed": true
+  },
+  {
+    "profile": "A",
+    "output": "WebView2 runtime: 155.0.4283.62\nMV3 fixture enabled before navigation: false\nProbe navigation finished: about:blank\nProbe navigation started: http://127.0.0.1:61676/probe\nProbe document title changed: \"Aurora probe waiting\"\nProbe navigation finished: http://127.0.0.1:61676/probe\nProbe failed: 20s timeout; no success claimed\n",
+    "exit": 1,
+    "operation": "probe",
+    "passed": true
+  },
+  {
+    "profile": "A",
+    "output": "enabled=true\nWebView2 runtime: 155.0.4283.62\nExtension: Microsoft Clipboard Extension\nExtension: Aurora MV3 local probe\nExtension: Microsoft Edge PDF Viewer\n",
+    "exit": 0,
+    "operation": "enable",
+    "passed": true
+  },
+  {
+    "profile": "A",
+    "output": "{\"worker\":true,\"visits\":3,\"id\":\"gnfcgjdnahjpabmoefljdbedgcfbncbj\",\"cookiesDenied\":true}\nWebView2 runtime: 155.0.4283.62\nMV3 fixture enabled before navigation: true\nProbe navigation started: about:blank\nProbe navigation finished: about:blank\nProbe navigation started: http://127.0.0.1:61729/probe\nProbe document title changed: \"Aurora probe waiting\"\nProbe navigation finished: http://127.0.0.1:61729/probe\nProbe document title changed: \"AURORA_MV3_OK:{\\\"worker\\\":true,\\\"visits\\\":3,\\\"id\\\":\\\"gnfcgjdnahjpabmoefljdbedgcfbncbj\\\",\\\"cookiesDenied\\\":true}\"\n",
+    "exit": 0,
+    "operation": "probe",
+    "passed": true
+  },
+  {
+    "profile": "A",
+    "output": "removed\nWebView2 runtime: 155.0.4283.62\nExtension: Microsoft Clipboard Extension\nExtension: Aurora MV3 local probe\nExtension: Microsoft Edge PDF Viewer\n",
+    "exit": 0,
+    "operation": "remove",
+    "passed": true
+  },
+  {
+    "profile": "A",
+    "output": "fixture_count=0 enabled=false\nWebView2 runtime: 155.0.4283.62\nExtension: Microsoft Clipboard Extension\nExtension: Microsoft Edge PDF Viewer\n",
+    "exit": 0,
+    "operation": "list",
+    "passed": true
+  },
+  {
+    "profile": "B",
+    "output": "fixture_count=1 enabled=true\nWebView2 runtime: 155.0.4283.62\nExtension: Microsoft Clipboard Extension\nExtension: Aurora MV3 local probe\nExtension: Microsoft Edge PDF Viewer\n",
+    "exit": 0,
+    "operation": "list",
+    "passed": true
+  }
+]
