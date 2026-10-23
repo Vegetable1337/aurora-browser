@@ -1,7 +1,10 @@
-use aurora_browser::{extensions, privacy, site_data, site_permissions, vault};
+use aurora_browser::{extensions, https_first, privacy, site_data, site_permissions, vault};
 
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock};
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex, RwLock},
+};
 use std::{fs, path::PathBuf};
 use winit::{
     application::ApplicationHandler,
@@ -32,6 +35,8 @@ enum UserEvent {
     SiteCookies(u64, String, Result<Vec<site_data::CookieInfo>, String>),
     SiteDataDone(u64, String, String, Result<(), String>),
     ProfileCacheDone(u64, Result<(), String>),
+    HttpNavigationBlocked(u64, String),
+    HttpsNavigationFailed(u64, String),
     PageTitle(u64, String),
     PageLoading(u64, bool),
     PageLoaded(u64, String),
@@ -55,6 +60,9 @@ struct BrowserTab {
     privacy_attached: bool,
     permissions: site_permissions::SharedPolicy,
     permission_gate: Arc<std::sync::atomic::AtomicBool>,
+    http_allowlist: Arc<Mutex<HashSet<String>>>,
+    https_fallback_candidate: Arc<Mutex<Option<String>>>,
+    https_first_enabled: Arc<std::sync::atomic::AtomicBool>,
     privacy: Arc<privacy::PrivacyState>,
     is_private: bool,
     view: WebView,
@@ -80,9 +88,15 @@ struct BrowserSettings {
     homepage: String,
     #[serde(default = "default_adblock_enabled")]
     adblock_enabled: bool,
+    #[serde(default = "default_https_first")]
+    https_first: bool,
 }
 
 fn default_adblock_enabled() -> bool {
+    true
+}
+
+fn default_https_first() -> bool {
     true
 }
 
@@ -94,6 +108,7 @@ impl Default for BrowserSettings {
             theme: "dark".into(),
             homepage: "aurora".into(),
             adblock_enabled: true,
+            https_first: true,
         }
     }
 }
@@ -429,9 +444,35 @@ impl AuroraApp {
         };
         let permission_ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let navigation_ready = permission_ready.clone();
+        let http_allowlist = Arc::new(Mutex::new(HashSet::new()));
+        let allowed_http = http_allowlist.clone();
+        let https_first_enabled = Arc::new(std::sync::atomic::AtomicBool::new(
+            self.settings.https_first,
+        ));
+        let https_first_for_handler = https_first_enabled.clone();
+        let navigation_proxy = self.proxy.as_ref().expect("event loop proxy").clone();
         builder = builder.with_navigation_handler(move |url| {
-            site_permissions::origin(&url).is_none()
-                || navigation_ready.load(std::sync::atomic::Ordering::Acquire)
+            if site_permissions::origin(&url).is_none() {
+                return true;
+            }
+            if !navigation_ready.load(std::sync::atomic::Ordering::Acquire) {
+                return false;
+            }
+            let Some(parsed) = url::Url::parse(&url).ok() else {
+                return false;
+            };
+            if https_first_for_handler.load(std::sync::atomic::Ordering::Acquire)
+                && parsed.scheme() == "http"
+                && !https_first::is_local_http_url(&url)
+            {
+                let origin = parsed.origin().ascii_serialization();
+                if allowed_http.lock().is_ok_and(|set| set.contains(&origin)) {
+                    return true;
+                }
+                let _ = navigation_proxy.send_event(UserEvent::HttpNavigationBlocked(id, url));
+                return false;
+            }
+            true
         });
         let page_background = if self.settings.theme == "light" {
             (234, 240, 249, 255)
@@ -495,6 +536,43 @@ impl AuroraApp {
         let view = builder
             .build_as_child(window)
             .expect("create Chromium page view");
+        let https_fallback_candidate = Arc::new(Mutex::new(None::<String>));
+        let candidate_for_handler = https_fallback_candidate.clone();
+        let https_setting_for_handler = https_first_enabled.clone();
+        let failure_proxy = self.proxy.as_ref().expect("event loop proxy").clone();
+        #[cfg(windows)]
+        if let Err(error) =
+            https_first::observe_failed_navigation(&view, move |source, succeeded, status| {
+                let Ok(mut candidate) = candidate_for_handler.lock() else {
+                    return;
+                };
+                let Some(expected) = candidate.as_ref() else {
+                    return;
+                };
+                let same_origin = url::Url::parse(&source)
+                    .ok()
+                    .zip(url::Url::parse(expected).ok())
+                    .is_some_and(|(actual, expected)| actual.origin() == expected.origin());
+                if same_origin && succeeded {
+                    *candidate = None;
+                } else if same_origin && https_first::should_offer_fallback(status) {
+                    if !https_setting_for_handler.load(std::sync::atomic::Ordering::Acquire) {
+                        *candidate = None;
+                        return;
+                    }
+                    if let Some(https_url) = candidate.take()
+                        && let Some(http_url) = https_first::fallback_url(&https_url)
+                    {
+                        let _ = failure_proxy
+                            .send_event(UserEvent::HttpsNavigationFailed(id, http_url));
+                    }
+                }
+            })
+        {
+            eprintln!(
+                "Aurora could not subscribe to navigation completion for HTTPS-first: {error}"
+            );
+        }
         let permissions = if is_private {
             Arc::new(RwLock::new(site_permissions::Policy::default()))
         } else {
@@ -538,6 +616,9 @@ impl AuroraApp {
             privacy_attached,
             permissions,
             permission_gate: permission_ready,
+            http_allowlist,
+            https_fallback_candidate,
+            https_first_enabled,
             privacy: tab_privacy,
             is_private,
             view,
@@ -754,6 +835,52 @@ impl AuroraApp {
         if let (Some(overlay), Ok(message)) = (self.overlay.as_ref(), serde_json::to_string(&error))
         {
             let _ = overlay.evaluate_script(&format!("window.siteDataError({message})"));
+        }
+    }
+
+    fn confirm_http_navigation(&mut self, id: u64, url: String, https_failed: bool) {
+        if !self.tabs.iter().any(|tab| tab.id == id) {
+            return;
+        }
+        let Some(origin) = url::Url::parse(&url)
+            .ok()
+            .map(|url| url.origin().ascii_serialization())
+        else {
+            return;
+        };
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+        let description = if https_failed {
+            format!(
+                "Не удалось подключиться к сайту по HTTPS. Перейти по незашифрованному HTTP?\n\n{url}\n\nПароли и другие данные на этой странице могут передаваться без шифрования."
+            )
+        } else {
+            format!(
+                "Сайт запрашивает незашифрованное соединение HTTP. Продолжить?\n\n{url}\n\nПароли и другие данные могут передаваться без шифрования."
+            )
+        };
+        let accepted = matches!(
+            rfd::MessageDialog::new()
+                .set_title("Небезопасное HTTP-соединение")
+                .set_description(description)
+                .set_level(rfd::MessageLevel::Warning)
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .set_parent(window)
+                .show(),
+            rfd::MessageDialogResult::Yes | rfd::MessageDialogResult::Ok
+        );
+        if accepted && let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) {
+            if let Ok(mut allowed) = tab.http_allowlist.lock() {
+                allowed.insert(origin);
+            }
+            tab.url = url.clone();
+            let _ = tab.view.load_url(&url);
+            self.refresh_chrome();
+        } else if self.active_tab == Some(id)
+            && let Some(chrome) = self.chrome.as_ref()
+        {
+            let _ = chrome.evaluate_script("window.showToast('Переход по HTTP отменён')");
         }
     }
 
@@ -1246,6 +1373,16 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                     }
                 }
             }
+            UserEvent::HttpNavigationBlocked(id, url) => {
+                if self.active_tab == Some(id) {
+                    self.confirm_http_navigation(id, url, false);
+                }
+            }
+            UserEvent::HttpsNavigationFailed(id, url) => {
+                if self.active_tab == Some(id) {
+                    self.confirm_http_navigation(id, url, true);
+                }
+            }
             UserEvent::StartupTimeout => {
                 if !self.window_shown
                     && let Some(window) = self.window.as_ref()
@@ -1377,17 +1514,45 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                         .map(str::trim)
                         .filter(|s| !s.is_empty())
                     {
-                        let url = resolve_input(input, &self.settings.search_engine);
-                        if let Some(tab) = self.active_tab_mut() {
-                            tab.url = url.clone();
-                            let _ = tab.view.load_url(&url);
+                        let url = resolve_input(
+                            input,
+                            &self.settings.search_engine,
+                            self.settings.https_first,
+                        );
+                        let id = self.active_tab;
+                        if self.settings.https_first
+                            && url.starts_with("http://")
+                            && !https_first::is_local_http_url(&url)
+                        {
+                            if let Some(id) = id {
+                                self.confirm_http_navigation(id, url, false);
+                            }
+                        } else {
+                            let allow_fallback = self.settings.https_first;
+                            if let Some(tab) = self.active_tab_mut() {
+                                if let Ok(mut candidate) = tab.https_fallback_candidate.lock() {
+                                    *candidate = allow_fallback
+                                        .then(|| https_first::fallback_url(&url))
+                                        .flatten();
+                                }
+                                tab.url = url.clone();
+                                let _ = tab.view.load_url(&url);
+                            }
+                            self.refresh_chrome();
                         }
-                        self.refresh_chrome();
                     }
                 }
                 "open_url" => {
                     if let Some(url) = command.value.as_deref() {
-                        if let Some(tab) = self.active_tab_mut() {
+                        let id = self.active_tab;
+                        if self.settings.https_first
+                            && url.starts_with("http://")
+                            && !https_first::is_local_http_url(url)
+                        {
+                            if let Some(id) = id {
+                                self.confirm_http_navigation(id, url.into(), false);
+                            }
+                        } else if let Some(tab) = self.active_tab_mut() {
                             tab.url = url.into();
                             let _ = tab.view.load_url(url);
                         }
@@ -1905,6 +2070,14 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                                     tab.privacy.set_enabled(self.settings.adblock_enabled);
                                 }
                             }
+                        } else if let Some(value) = value.strip_prefix("https_first=") {
+                            self.settings.https_first = value == "true";
+                            for tab in &self.tabs {
+                                tab.https_first_enabled.store(
+                                    self.settings.https_first,
+                                    std::sync::atomic::Ordering::Release,
+                                );
+                            }
                         }
                         if let Some(path) = &self.settings_path {
                             let _ = write_json_atomically(path, &self.settings);
@@ -2092,15 +2265,23 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
     }
 }
 
-fn resolve_input(input: &str, search_engine: &str) -> String {
+fn resolve_input(input: &str, search_engine: &str, https_first: bool) -> String {
     let has_scheme = input.split_once("://").is_some();
     let looks_like_host = input.contains('.') && !input.chars().any(char::is_whitespace);
     if has_scheme {
         input.to_owned()
-    } else if input.starts_with("localhost") || input.starts_with("127.0.0.1") {
+    } else if input.starts_with("localhost")
+        || input.starts_with("127.0.0.1")
+        || input.starts_with("[::1]")
+    {
         format!("http://{input}")
     } else if looks_like_host {
-        format!("https://{input}")
+        let local_http = format!("http://{input}");
+        if https_first::is_local_http_url(&local_http) {
+            local_http
+        } else {
+            format!("{}://{input}", if https_first { "https" } else { "http" })
+        }
     } else {
         let query: String = url::form_urlencoded::byte_serialize(input.as_bytes()).collect();
         if search_engine == "google" {
@@ -2293,5 +2474,29 @@ mod ui_navigation_tests {
                 assert!(!is_trusted_ui_navigation(foreign, html));
             }
         }
+    }
+
+    #[test]
+    fn address_resolution_prefers_https_but_keeps_local_http() {
+        assert_eq!(
+            resolve_input("example.com/path", "duckduckgo", true),
+            "https://example.com/path"
+        );
+        assert_eq!(
+            resolve_input("example.com/path", "duckduckgo", false),
+            "http://example.com/path"
+        );
+        assert_eq!(
+            resolve_input("localhost:8080", "duckduckgo", true),
+            "http://localhost:8080"
+        );
+        assert_eq!(
+            resolve_input("192.168.1.20/printer", "duckduckgo", true),
+            "http://192.168.1.20/printer"
+        );
+        assert_eq!(
+            resolve_input("nas.local", "duckduckgo", true),
+            "http://nas.local"
+        );
     }
 }

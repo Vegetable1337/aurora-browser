@@ -8,6 +8,8 @@ The first implementation is available in Settings → Privacy. It retains Aurora
 - "Clear site data" uses WebView2's DevTools `Storage.clearDataForOrigin` for the exact HTTP(S) origin. This clears supported origin-scoped storage such as cookies, local storage, IndexedDB, Cache Storage and service workers. It does not clear history or downloaded files. WebView2's origin storage command has no private-browsing context parameter; it runs against the active view's own profile/context.
 - "Clear profile cache" uses WebView2 `ICoreWebView2Profile2::ClearBrowsingData(DISK_CACHE)`. WebView2 only exposes this cache operation at profile scope, so the confirmation and label explain it affects every site in the current WebView2 profile. It does not remove cookies or site storage.
 - Both destructive actions ask for confirmation. Cookie values are omitted from IPC and logs. Async results are discarded if the active tab or origin changed before completion.
+- HTTPS-first is on by default for new hostnames entered without a scheme. Localhost, loopback, RFC1918/link-local IPs and `.local` hosts use HTTP directly for local services. An explicitly entered HTTP URL or an HTTP redirect is stopped in WebView2's navigation handler and requires a native Yes/No confirmation. Consent is remembered only for that origin in the current tab.
+- On an entered HTTPS URL, WebView2 `NavigationCompleted` is observed. Only connection/DNS/timeout failures offer an HTTP retry; certificate failures, cancellations and other errors never do. Aurora does not relax TLS checks or install interception certificates. Users can disable HTTPS-first in Privacy settings; old settings files default to enabled.
 
 - Displays the current HTTP(S) origin and explicitly distinguishes HTTP from an HTTPS URL. This is not a certificate viewer or a mixed-content audit; the UI states that those details have not been retrieved. TLS verification remains the engine's responsibility and is not bypassed.
 - Shows separate profile and current-origin blocking counters. Counts are acknowledged only after WebView2 accepts the replacement response, not merely after an ABP match. Subframe attribution uses the top-level WebView Source, as in the existing filter.
@@ -20,10 +22,11 @@ The first implementation is available in Settings → Privacy. It retains Aurora
 
 ## Checks actually executed
 
-- `cargo test --locked`: 17 tests passed: 16 shared-component tests plus one internal-UI navigation test. Tests include exact-origin validation and cookie-domain scope validation, as well as counter acknowledgment and legacy migration.
+- Latest `cargo test --locked`: 20 tests passed: 18 shared-component tests and 2 main-app tests. Tests include HTTPS-first resolution, network-error classification and local/LAN handling, exact-origin validation, cookie-domain scope validation, counter acknowledgment and legacy-permission migration.
 - Added origin/scheme/port/reset validation and encrypted policy round-trip, independent profile and locked-vault tests.
 - `cargo run --example site_permissions_probe --locked`: actual WebView2 HTTP loopback page requested geolocation and received PERMISSION_DENIED; the test also asserted that the production Aurora permission callback was actually invoked. Uses a new UUID temporary profile, no user data and a 15-second watchdog. This is an API integration test, not a mouse-driven GUI result.
 - `cargo run --example site_data_probe --locked`: real WebView2 queried a test cookie, removed it through CookieManager, cleared the exact origin through `Storage.clearDataForOrigin`, cleared the profile disk cache, then checked that the cookie and localStorage value were gone. It used a new UUID temporary profile and a 15-second watchdog.
+- HTTPS-first unit tests cover default address resolution, local/LAN exemptions and the network-error allowlist. The native modal confirmation and a live real-site HTTPS failure were not GUI-tested in this run.
 - `node --check` on extracted inline scripts: chrome.html and overlay.html passed.
 
 ## Remaining stages and manual checks
