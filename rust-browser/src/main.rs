@@ -1,4 +1,4 @@
-use aurora_browser::{extensions, privacy, site_permissions, vault};
+use aurora_browser::{extensions, privacy, site_data, site_permissions, vault};
 
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
@@ -29,6 +29,9 @@ enum UserEvent {
     StartupTimeout,
     PermissionsReady(u64, Result<(), String>),
     LegacyPermissions(u64, Result<Vec<site_permissions::LegacyPermission>, String>),
+    SiteCookies(u64, String, Result<Vec<site_data::CookieInfo>, String>),
+    SiteDataDone(u64, String, String, Result<(), String>),
+    ProfileCacheDone(u64, Result<(), String>),
     PageTitle(u64, String),
     PageLoading(u64, bool),
     PageLoaded(u64, String),
@@ -747,6 +750,13 @@ impl AuroraApp {
         let _ = overlay.evaluate_script(&format!("window.setSitePrivacy({snapshot})"));
     }
 
+    fn show_site_data_error(&self, error: String) {
+        if let (Some(overlay), Ok(message)) = (self.overlay.as_ref(), serde_json::to_string(&error))
+        {
+            let _ = overlay.evaluate_script(&format!("window.siteDataError({message})"));
+        }
+    }
+
     fn open_overlay(&mut self) {
         if self.overlay.is_none() {
             let (Some(window), Some(context)) = (self.window.as_ref(), self.ui_context.as_mut())
@@ -1163,6 +1173,79 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                     "Aurora permission initialization failed; navigation blocked: {error}"
                 ),
             },
+            UserEvent::SiteCookies(id, origin, result) => {
+                if self.active_tab != Some(id)
+                    || self
+                        .tabs
+                        .iter()
+                        .find(|tab| tab.id == id)
+                        .and_then(|tab| site_permissions::origin(&tab.url))
+                        .as_deref()
+                        != Some(&origin)
+                {
+                    return;
+                }
+                let Some(overlay) = self.overlay.as_ref() else {
+                    return;
+                };
+                match result {
+                    Ok(cookies) => {
+                        let json = serde_json::to_string(&cookies).unwrap_or_else(|_| "[]".into());
+                        let _ = overlay.evaluate_script(&format!("window.setSiteCookies({json})"));
+                    }
+                    Err(error) => {
+                        let message = serde_json::to_string(&error)
+                            .unwrap_or_else(|_| "\"Не удалось прочитать cookies\"".into());
+                        let _ =
+                            overlay.evaluate_script(&format!("window.siteDataError({message})"));
+                    }
+                }
+            }
+            UserEvent::SiteDataDone(id, origin, operation, result) => {
+                if self.active_tab != Some(id)
+                    || self
+                        .tabs
+                        .iter()
+                        .find(|tab| tab.id == id)
+                        .and_then(|tab| site_permissions::origin(&tab.url))
+                        .as_deref()
+                        != Some(&origin)
+                {
+                    return;
+                }
+                if let Some(overlay) = self.overlay.as_ref() {
+                    match result {
+                        Ok(()) => {
+                            let op = serde_json::to_string(&operation).unwrap_or_default();
+                            let _ = overlay.evaluate_script(&format!("window.siteDataDone({op})"));
+                        }
+                        Err(error) => {
+                            let message = serde_json::to_string(&error)
+                                .unwrap_or_else(|_| "\"Не удалось очистить данные\"".into());
+                            let _ = overlay
+                                .evaluate_script(&format!("window.siteDataError({message})"));
+                        }
+                    }
+                }
+            }
+            UserEvent::ProfileCacheDone(id, result) => {
+                if self.active_tab != Some(id) {
+                    return;
+                }
+                if let Some(overlay) = self.overlay.as_ref() {
+                    match result {
+                        Ok(()) => {
+                            let _ = overlay.evaluate_script("window.siteDataDone('cache')");
+                        }
+                        Err(error) => {
+                            let message = serde_json::to_string(&error)
+                                .unwrap_or_else(|_| "\"Не удалось очистить кэш\"".into());
+                            let _ = overlay
+                                .evaluate_script(&format!("window.siteDataError({message})"));
+                        }
+                    }
+                }
+            }
             UserEvent::StartupTimeout => {
                 if !self.window_shown
                     && let Some(window) = self.window.as_ref()
@@ -1609,6 +1692,130 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                         }
                     }
                     self.refresh_privacy_panel();
+                }
+                "site_data_refresh"
+                | "site_data_clear_origin"
+                | "site_cookie_delete"
+                | "site_data_clear_cache" => {
+                    #[cfg(windows)]
+                    {
+                        let Some(tab_id) = self.active_tab else {
+                            return;
+                        };
+                        let Some(tab) = self.tabs.iter().find(|tab| tab.id == tab_id) else {
+                            return;
+                        };
+                        let Some(origin) = site_permissions::origin(&tab.url) else {
+                            return;
+                        };
+                        if !tab
+                            .permission_gate
+                            .load(std::sync::atomic::Ordering::Acquire)
+                        {
+                            return;
+                        }
+                        let value: serde_json::Value =
+                            serde_json::from_str(command.value.as_deref().unwrap_or("{}"))
+                                .unwrap_or_default();
+                        if value.get("tabId").and_then(serde_json::Value::as_u64) != Some(tab_id)
+                            || value.get("origin").and_then(serde_json::Value::as_str)
+                                != Some(origin.as_str())
+                        {
+                            return;
+                        }
+                        let Some(proxy) = self.proxy.as_ref().cloned() else {
+                            return;
+                        };
+                        match command.action.as_str() {
+                            "site_data_refresh" => {
+                                if let Err(error) =
+                                    site_data::list_cookies(&tab.view, &tab.url, move |result| {
+                                        let _ = proxy.send_event(UserEvent::SiteCookies(
+                                            tab_id, origin, result,
+                                        ));
+                                    })
+                                {
+                                    self.show_site_data_error(error);
+                                }
+                            }
+                            "site_cookie_delete" => {
+                                let name = value
+                                    .get("name")
+                                    .and_then(serde_json::Value::as_str)
+                                    .unwrap_or("");
+                                let domain = value
+                                    .get("domain")
+                                    .and_then(serde_json::Value::as_str)
+                                    .unwrap_or("");
+                                let path = value
+                                    .get("path")
+                                    .and_then(serde_json::Value::as_str)
+                                    .unwrap_or("");
+                                let host = url::Url::parse(&origin)
+                                    .ok()
+                                    .and_then(|url| url.host_str().map(str::to_owned))
+                                    .unwrap_or_default();
+                                if !site_data::cookie_domain_matches_host(domain, &host) {
+                                    self.show_site_data_error(
+                                        "Cookie не относится к текущему сайту".into(),
+                                    );
+                                    return;
+                                }
+                                let event_origin = origin.clone();
+                                let proxy = proxy.clone();
+                                if let Err(error) = site_data::delete_cookie(
+                                    &tab.view,
+                                    &tab.url,
+                                    name,
+                                    domain,
+                                    path,
+                                    move |result| {
+                                        let _ = proxy.send_event(UserEvent::SiteDataDone(
+                                            tab_id,
+                                            event_origin,
+                                            "cookie".into(),
+                                            result,
+                                        ));
+                                    },
+                                ) {
+                                    self.show_site_data_error(error);
+                                }
+                            }
+                            "site_data_clear_origin" => {
+                                let event_origin = origin.clone();
+                                if let Err(error) = site_data::clear_origin_storage(
+                                    &tab.view,
+                                    &origin,
+                                    move |result| {
+                                        let _ = proxy.send_event(UserEvent::SiteDataDone(
+                                            tab_id,
+                                            event_origin,
+                                            "origin".into(),
+                                            result,
+                                        ));
+                                    },
+                                ) {
+                                    self.show_site_data_error(error);
+                                }
+                            }
+                            "site_data_clear_cache" => {
+                                if let Err(error) =
+                                    site_data::clear_profile_cache(&tab.view, move |result| {
+                                        let _ = proxy.send_event(UserEvent::ProfileCacheDone(
+                                            tab_id, result,
+                                        ));
+                                    })
+                                {
+                                    self.show_site_data_error(error);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    #[cfg(not(windows))]
+                    self.show_site_data_error(
+                        "Управление данными сайтов пока доступно только в WebView2".into(),
+                    );
                 }
                 "privacy_refresh_stats" => self.refresh_privacy_panel(),
                 "privacy_toggle_site" => {
