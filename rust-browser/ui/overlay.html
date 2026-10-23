@@ -46,10 +46,12 @@
   .download-list{display:grid;gap:9px;max-height:min(470px,calc(100vh - 250px));overflow:auto;padding:3px 2px 12px}.download-card{display:grid;gap:7px;padding:12px;border:1px solid var(--line);border-radius:15px;background:var(--surface)}.download-heading{display:flex;justify-content:space-between;align-items:center;gap:10px}.download-heading strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.download-state{color:var(--muted);font-size:11px;white-space:nowrap}.download-state.completed{color:#9bd6b0}.download-state.interrupted,.download-error{color:#ffb4aa}.download-url,.download-detail{color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.download-card progress{width:100%;height:6px;accent-color:#8eafff}.download-actions{display:flex;justify-content:flex-end;gap:7px}
   html.light .extension-card{background:#fff9}html.light .extension-error{color:#a33227}
   html.no-motion *,html.no-motion *::before,html.no-motion *::after{transition:none!important;animation:none!important}
-  html.light{color-scheme:light;--text:#1d2638;--muted:#68758a;--line:#18284718;--surface:#18284708;--hover:#1828470c;--accent:#476fc6;--card:#f2f6ff}
+  html.light{color-scheme:light;--text:#1d2638;--muted:#5e6a80;--line:#18284718;--surface:#18284708;--hover:#1828470c;--accent:#476fc6;--card:#f2f6ff}
   html.light .scrim{background:#24314b42}html.light .card{background:linear-gradient(150deg,#fbfcffff,var(--card));border-color:#fff;box-shadow:0 25px 70px #26375438,inset 0 1px #fff}
   html.light .nav-item.active{background:#466fc51a;border-color:#466fc520;color:#294b91}html.light .setting select{background:#fff;color:var(--text);border-color:#16284920}
   html.light .save-note{background:#2999580b;border-color:#29995827;color:#28633f}html.light .save-dot{background:#35a761}
+  html.light .extension-status:not(.off),html.light .download-state.completed{color:#28633f}
+  html.light .extension-toast{color:#294b91}html.light .download-state.interrupted,html.light .download-error{color:#a33227}
   @media(max-width:560px){.card.settings-mode{padding:10px}.settings-layout{grid-template-columns:1fr;gap:10px;min-height:0}.settings-nav{flex-direction:row;padding:0 0 10px;border-right:0;border-bottom:1px solid var(--line)}.nav-item{justify-content:center;padding:9px 7px}.nav-icon{width:auto}.settings-content{max-height:calc(100vh - 230px)}.setting{gap:8px}.setting select{min-width:120px;max-width:145px}}
 </style>
 </head>

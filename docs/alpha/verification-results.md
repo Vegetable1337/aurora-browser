@@ -95,6 +95,46 @@ build, UI JavaScript syntax, actual dark/light window captures, Release launch
 smoke, and installer lifecycle smoke all passed. The layout change is now in the
 worktree and its new commit still needs its own Actions run.
 
+### Light-theme contrast follow-up
+
+Contrast inspection found several muted labels and placeholders below the WCAG
+AA 4.5:1 text contrast target. The light theme now uses a darker secondary text
+color across the new-tab page, toolbar, and overlay. Success, warning, and error
+states in extension/download cards also have explicit light-theme colors. The
+updated actual Release screenshots were captured in both themes at maximized and
+720x480 minimum window sizes; the minimum light screenshot confirms the search,
+four shortcuts, and footer remain visible. Contrast ratios for the adjusted text
+pairs range from 4.76:1 to 5.26:1. UI/MV3 JavaScript syntax validation passed.
+
+The current local worktree passed `cargo fmt --check`, `cargo test --locked`
+(24 Rust tests), `cargo clippy --all-targets --locked -- -D warnings`,
+`cargo build --release --locked`, 19 Python unittests, UI/MV3 JavaScript syntax,
+and `cargo audit`. Audit completed with three warnings for unmaintained or
+unsound transitive GTK/WebKit-related dependencies (`proc-macro-error`,
+`ttf-parser`, and `glib`); no advisory was reported as a vulnerability requiring
+an immediate Windows-path update. The full security audit is in
+[`p0-audit.md`](../p0-audit.md).
+
+The installer and portable archive were rebuilt from that Release binary. The
+installer smoke passed first install, repeat install, Start menu shortcut,
+uninstall registration, and uninstall. Release launch smoke confirmed a visible
+window and clean `WM_CLOSE` exit without Rust tools on `PATH`. Windows retained
+one disposable WebView2 profile under `%TEMP%` after shutdown, so temporary-data
+cleanup was not fully clean in that run. The portable archive contains only
+`Aurora.exe`, `LICENSE`, and `README.txt`. Current artifact hashes:
+
+```text
+b6d7876897e288cf40dfb68dd760145d1c40e8c5b422f070a97987e0eefe44ad  Aurora-0.1.0-alpha-Windows-x64-Setup.exe
+aa941c599e57d1e183513a1731cf50cf91a4b73da956bd093e8a204f0d91dc77  Aurora-0.1.0-alpha-Windows-x64-Portable.zip
+```
+
+GitHub Actions run [39965491576](https://github.com/Vegetable1337/aurora-browser/actions/runs/39965491576)
+for commit `44a01f0` passed its Rust formatting, tests, UI syntax, WebView2 probe
+build, Windows build, and Python job at the latest check. `cargo install
+cargo-audit --locked` was still running, so that run is not yet recorded as
+successful. The light-theme contrast follow-up is local and requires a new CI
+run after it is committed and pushed.
+
 Local validation also passed `cargo build --release --locked`, the Release
 launch smoke, UI syntax, `cargo audit`, and 19 Python unittests. `cargo audit`
 reports three non-failing warnings for the future Linux GTK/WebKit backend; see
