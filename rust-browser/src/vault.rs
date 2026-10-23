@@ -330,7 +330,10 @@ impl ProfileVault {
         let mut expanded = 0u64;
         for index in 0..zip.len() {
             let mut entry = zip.by_index(index).map_err(|_| VaultError::InvalidBackup)?;
-            let name = entry.name().to_owned();
+            let name = entry
+                .name()
+                .map_err(|_| VaultError::InvalidBackup)?
+                .into_owned();
             if !matches!(name.as_str(), "profile.json" | "records.sqlite3")
                 || files.contains_key(&name)
             {

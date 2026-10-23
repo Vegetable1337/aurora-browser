@@ -126,3 +126,24 @@ Windows accessibility inspection confirmed the tab, new-tab button, address bar,
 navigation controls and settings button exist again. Screenshot capture timed
 out and button input failed because geometry was unavailable, so interactive
 new-tab/menu smoke checks have not been confirmed through this tool.
+
+## Follow-up: Windows security CI audit failure (2026-10-23)
+
+GitHub Actions runs 1–5 of `Windows security regression` were inspected. Rust
+format, unit tests, UI syntax and Windows build steps succeeded; the legacy
+Python job also succeeded in each run. The only failing step was `cargo audit`.
+Runs 1–5 reported `RUSTSEC-2026-0384` for Tokio 1.54.0 and three ZIP extraction
+advisories (`RUSTSEC-2026-0367`, `-0368`, `-0369`) for zip 2.6.1. Tokio is now
+locked at 1.54.1 and the backup archive dependency is upgraded to zip 9.0.5.
+The backup reader handles the new fallible entry-name API by rejecting invalid
+names as `InvalidBackup`; the existing encrypted backup format is unchanged.
+
+Local validation after the dependency update: `cargo fmt --check`, `cargo test
+--locked` (21 tests), `cargo clippy --all-targets --locked -- -D warnings`,
+`cargo build --locked`, `cargo build --example extensions_probe --locked`,
+`node packaging/check-ui-syntax.cjs`, and `python -m unittest discover -s tests
+-v` (19 tests) passed. `cargo audit` exited successfully with three advisories
+reported as non-failing warnings: unmaintained `proc-macro-error` and
+`ttf-parser`, and the existing `glib::VariantStrIter` unsoundness advisory.
+These warnings are not suppressed. The new GitHub Actions run for the fix must
+complete before CI is reported green.

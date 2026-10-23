@@ -21,7 +21,7 @@ sha2 = "0.10"
 thiserror = "2"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 zeroize = "1"
 winit = "0.30"
 wry = "0.57"
