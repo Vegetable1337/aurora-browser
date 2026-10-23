@@ -1028,6 +1028,20 @@ impl AuroraApp {
         // decryption or decode failure must leave the active profile untouched.
         let bookmarks = load_vault_records(&new_vault, "bookmarks")?;
         let history = load_vault_records(&new_vault, "history")?;
+        // Load every encrypted security/privacy record before switching context.
+        // A corrupt record must not silently reset a user's decisions.
+        let permissions = load_vault_record::<site_permissions::Policy>(
+            &new_vault,
+            "site-permissions",
+            "policy",
+        )?
+        .unwrap_or_default();
+        let privacy_exceptions =
+            load_vault_record::<HashSet<String>>(&new_vault, "privacy-sites", "exceptions")?
+                .unwrap_or_default();
+        let downloads =
+            load_vault_record::<Vec<DownloadRecord>>(&new_vault, "downloads", "history")?
+                .unwrap_or_default();
         let data_dir = new_vault.directory().join("WebView2");
         fs::create_dir_all(&data_dir)
             .map_err(|error| format!("Не удалось открыть данные WebView2 профиля: {error}"))?;
@@ -1040,15 +1054,22 @@ impl AuroraApp {
         self.active_tab = None;
         self.context = None;
         self.context = Some(wry::WebContext::new(Some(data_dir)));
+        let profile_id = new_vault.profile_id().to_owned();
         self.active_vault = Some(new_vault);
-        self.configure_downloads();
-        let profile_dir = self
-            .active_vault
-            .as_ref()
-            .expect("vault just set")
-            .directory()
-            .to_path_buf();
-        self.configure_privacy_state(profile_dir.join("privacy-sites.json"));
+        self.download_scope = profile_id;
+        self.downloads = downloads;
+        self.download_speed_samples.clear();
+        self.permissions = Arc::new(RwLock::new(permissions));
+        let engine = self
+            .privacy_engine
+            .clone()
+            .unwrap_or_else(|| Arc::new(RwLock::new(Arc::new(privacy::build_engine(&[])))));
+        self.privacy_state = Some(Arc::new(privacy::PrivacyState::new(
+            engine,
+            self.settings.adblock_enabled,
+            privacy_exceptions,
+        )));
+        self.privacy_path = None;
         self.bookmarks = Some(bookmarks);
         self.history = Some(history);
         self.bookmarks_path = None;
@@ -2684,6 +2705,22 @@ fn load_vault_records<T: for<'de> Deserialize<'de>>(
         .collect()
 }
 
+fn load_vault_record<T: for<'de> Deserialize<'de>>(
+    vault: &vault::ProfileVault,
+    domain: &str,
+    id: &str,
+) -> Result<Option<T>, String> {
+    let records = vault
+        .list(domain)
+        .map_err(|error| format!("Не удалось расшифровать хранилище профиля: {error}"))?;
+    let Some((_, bytes)) = records.into_iter().find(|(record_id, _)| record_id == id) else {
+        return Ok(None);
+    };
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|_| format!("В зашифрованной области {domain} повреждена запись"))
+}
+
 fn persist_vault_records<T: Serialize>(
     vault: &vault::ProfileVault,
     domain: &str,
@@ -2848,6 +2885,30 @@ mod ui_navigation_tests {
         assert!(
             result.is_err(),
             "corrupt encrypted data must not look empty"
+        );
+    }
+
+    #[test]
+    fn corrupt_encrypted_permission_policy_fails_profile_loading() {
+        let root =
+            std::env::temp_dir().join(format!("aurora-policy-load-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let result = {
+            let created = vault::ProfileVault::create(&root, "Test", "test password").unwrap();
+            created
+                .vault
+                .put("site-permissions", "policy", b"not json")
+                .unwrap();
+            load_vault_record::<site_permissions::Policy>(
+                &created.vault,
+                "site-permissions",
+                "policy",
+            )
+        };
+        fs::remove_dir_all(&root).unwrap();
+        assert!(
+            result.is_err(),
+            "corrupt permission decisions must not be replaced with defaults"
         );
     }
 }

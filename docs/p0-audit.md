@@ -174,3 +174,18 @@ Post-change checks passed locally: `cargo fmt --check`, `cargo test --locked`
 Python unittests. GitHub Actions run [39940708619](https://github.com/Vegetable1337/aurora-browser/actions/runs/39940708619)
 completed successfully: formatting, tests, UI syntax, probe build, Windows app
 build, dependency audit, and the legacy Python job all passed.
+
+## Follow-up: protected profile auxiliary state (2026-10-23)
+
+Profile activation also validates encrypted site-permission policy, adblock site
+exceptions, and download history before switching away from the active profile.
+Missing records remain compatible with older profiles and use safe defaults;
+present records that cannot be decrypted or decoded now abort activation. This
+prevents corrupted data from silently erasing explicit permission or privacy
+choices. The regression suite now covers malformed encrypted bookmark and
+permission-policy JSON records.
+
+Verification after this change: `cargo fmt --check`, `cargo test --locked`
+(23 tests), `cargo clippy --all-targets --locked -- -D warnings`, and
+`cargo build --locked` passed. GitHub Actions for commit `808e5d7` passed all jobs;
+the new follow-up commit still needs its own remote CI run.
