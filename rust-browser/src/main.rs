@@ -34,6 +34,7 @@ struct BrowserCommand {
 enum UserEvent {
     Command(BrowserCommand),
     StartupTimeout,
+    ShowWindow,
     PermissionsReady(u64, Result<(), String>),
     LegacyPermissions(u64, Result<Vec<site_permissions::LegacyPermission>, String>),
     SiteCookies(u64, String, Result<Vec<site_data::CookieInfo>, String>),
@@ -1694,6 +1695,18 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                     self.window_shown = true;
                 }
             }
+            UserEvent::ShowWindow => {
+                if !self.window_shown
+                    && self
+                        .active_tab
+                        .and_then(|active_id| self.tabs.iter().find(|tab| tab.id == active_id))
+                        .is_some_and(|tab| tab.first_load_complete)
+                    && let Some(window) = self.window.as_ref()
+                {
+                    window.set_visible(true);
+                    self.window_shown = true;
+                }
+            }
             UserEvent::FilterListsUpdated(result) => match result {
                 Ok((lists, replacement)) => {
                     let mut installed = false;
@@ -2542,8 +2555,13 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                         });
                         let _ = tab.view.set_visible(true);
                         if !self.window_shown {
-                            window.set_visible(true);
-                            self.window_shown = true;
+                            let proxy = self.proxy.as_ref().expect("event loop proxy").clone();
+                            std::thread::spawn(move || {
+                                // WebView2's load-finished event precedes its first composed
+                                // frame. Let it paint while the top-level window stays hidden.
+                                std::thread::sleep(std::time::Duration::from_secs(1));
+                                let _ = proxy.send_event(UserEvent::ShowWindow);
+                            });
                         }
                     }
                     self.record_history(id, url);

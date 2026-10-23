@@ -38,11 +38,15 @@ its disposable profile using bounded retries for delayed WebView2 file release.
 a disposable profile, waits for the visible Aurora window, captures the desktop
 window, closes it through UI Automation, and removes the disposable data. The
 captured `evidence/main-window.png` shows the rendered Aurora new-tab page.
-The immediate capture can catch the dark WebView background before its first
-compositor frame; a capture after a one-second settling interval showed the
-complete page. This is a short first-paint delay, not a failed navigation. The
-capture verifies rendering only; UIA still cannot operate the HTML controls, so
-it does not replace the manual interaction checklist.
+The initial capture exposed a first-paint race: WebView2 reported load completion
+before its first composed frame, so Aurora showed its window over an empty dark
+viewport. Startup now keeps the top-level window hidden for one second after
+making the loaded first tab visible, then shows it through a separate event so
+the UI thread does not sleep. Three immediate captures after the window became
+visible showed the complete page. This adds up to one second to initial window
+presentation; the existing 12-second fallback still shows the window if startup
+does not complete. The capture verifies rendering only; UIA still cannot operate
+the HTML controls, so it does not replace the manual interaction checklist.
 
 ## Windows Alpha packaging
 
