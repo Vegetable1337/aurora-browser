@@ -16,6 +16,14 @@ This is a limited WebView2 integration, not Chrome or Firefox compatibility. Web
 
 See [the implementation and test status](extensions-prototype.md). The native probe exercises service workers, content scripts, messaging, storage persistence and cross-profile isolation, while the main application manager has compile/unit coverage. Full extension-manager lifecycle tests against real Aurora windows, hostile extension tests, popup/action behavior and operating-system sandbox verification remain outstanding.
 
+## Network privacy filtering
+
+On Windows, every regular and private page WebView receives an HTTP/HTTPS `WebResourceRequested` handler. It maps the WebView2 resource context to Brave `adblock-rust` request types, evaluates the destination against the current top-level source URL, and returns an empty 204 response only for requests the engine marks blocked. The UI counter increments only after such a match. A per-profile host exception bypasses the engine for requests whose source host equals that site; protected-profile exceptions are records in the encrypted vault.
+
+EasyList and EasyPrivacy are fetched at startup from fixed HTTPS URLs using a bounded response reader. A redirect must remain HTTPS and on the expected host; each list must be <=12 MiB and pass a basic ABP structure check. Valid snapshots are atomically cached. On network/validation failure the last valid cache stays in use; without a cache Aurora has a small built-in fallback list. Fetching, parsing and engine construction run on a worker thread, then a read/write lock swaps the fully built engine snapshot. The request callback does only request construction and matching.
+
+WebView2 exposes resource context and request URL to this handler but the current implementation obtains source context from the WebView's top-level `Source`, including for subframes. Thus it does not have precise iframe initiator context. It filters HTTP(S) requests surfaced by WebResourceRequested, not DNS, runtime-internal traffic or cosmetic DOM elements. It is network filtering, not a privacy/anonymity guarantee. Automatic list refresh currently happens on browser startup; there is no user-configurable schedule or list subscription UI.
+
 ## Data protection boundary
 
 Protected Aurora profiles encrypt Aurora-owned bookmarks and visit records. WebView2 stores cookies, cache, site data, extension data and other Chromium profile state in separate profile directories that are not encrypted by Aurora. The `Extensions` source copy and its permission registry are also ordinary files under that profile directory. This architecture must not be described as whole-profile encryption.

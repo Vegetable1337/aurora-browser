@@ -26,6 +26,10 @@ The page profile and `bookmarks.json`, `history.json` and `settings.json` are st
 
 The Aurora mark is maintained as a vector in `assets/aurora.svg`; generated PNG and multi-size ICO versions provide the window and Windows executable icons.
 
+Network privacy filtering uses Brave `adblock-rust` in WebView2's HTTP(S) `WebResourceRequested` callback. EasyList and EasyPrivacy are fetched over HTTPS from fixed hosts at startup, checked for HTTPS/same-host redirects, size and basic ABP structure, and cached through an atomic replacement. The current-site exception is stored per profile; exceptions for password-protected profiles are encrypted in their vault. The privacy panel shows the active toggle, real blocked-request count and current-site exception. When lists are unavailable, a small built-in rule set remains active.
+
+The callback sees WebView2 resource contexts (documents, scripts, stylesheets, images, media, fonts, XHR/fetch, WebSocket and related HTTP(S) requests). DNS, WebView2 internal traffic, non-HTTP(S) protocols and cosmetic page-element hiding are outside this filter. For subframes, WebView2's current top-level source URL is used as the page context. Filter parsing and engine construction run on a worker thread; the active engine is replaced as one shared snapshot. This does not provide full anonymity or guarantee that every tracker is blocked.
+
 The Library menu includes an experimental Extensions manager. It accepts local
 unpacked Manifest V3 folders, stages an independent copy per WebView2 profile,
 shows the declared API/host permissions for confirmation, and supports listing,
@@ -34,6 +38,6 @@ Library overlay use a separate extension-free context. Firefox packages, Chrome
 Web Store install/update, complete Chrome API coverage, and extension action
 popups are unsupported or unverified. See [extension status](../docs/extensions-prototype.md).
 
-Downloads now ask for a save location, but there is not yet a downloads manager. Searches use DuckDuckGo. Separate private browser windows, website permission management and tracker blocking from the Python version are not yet migrated. The Rust version remains incomplete; a private tab is not a separate private window.
+Downloads now ask for a save location, but there is not yet a downloads manager. Searches use DuckDuckGo. Separate private browser windows and website permission management from the Python version are not yet migrated. The Rust version remains incomplete; a private tab is not a separate private window.
 
 Protected profile management is available from the library menu: create, switch, lock, change the password, delete, export an encrypted backup, and restore one. Password and recovery-key unlock use Argon2id, AES-256-GCM and HKDF-SHA-256. On Windows the master key also has a user-scoped DPAPI wrapper. Aurora bookmarks/history are encrypted in SQLite. WebView2 data is kept in a separate directory for each protected profile, but is not encrypted; it includes cookies, cache, and other Chromium data. Do not treat this as whole-profile encryption.

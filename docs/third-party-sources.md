@@ -13,11 +13,11 @@ Aurora uses upstream projects as dependencies or engineering references. It does
 
 - Source: <https://github.com/brave/adblock-rust>
 - License: Mozilla Public License 2.0 (MPL-2.0)
-- Python bindings: <https://github.com/ArniDagur/python-adblock>, pinned in `requirements.txt` as `adblock==0.6.0`
-- Python bindings license: MIT OR Apache-2.0
-- Used in Aurora: network-rule matching inside `app/privacy.py`. The shipped host rules are Aurora's existing small list converted to standard ABP syntax; EasyList/EasyPrivacy and cosmetic filters are not currently bundled.
+- Rust crate `adblock` is pinned in `rust-browser/Cargo.toml`/`Cargo.lock` and powers HTTP(S) request matching in WebView2. The Rust app fetches EasyList and EasyPrivacy over HTTPS at startup and has a built-in fallback rule set.
+- Python bindings: <https://github.com/ArniDagur/python-adblock>, pinned in `requirements.txt` as `adblock==0.6.0`; used by `app/privacy.py`.
+- The adblock-rust upstream is MPL-2.0; Python bindings are MIT OR Apache-2.0. Review all direct and transitive license obligations before distributing a built application.
 
-The adblock engine's functionality is used through its published Python package. No upstream implementation source files are copied into Aurora.
+No upstream implementation source files are copied into Aurora.
 
 ## qutebrowser
 
@@ -43,6 +43,7 @@ The adblock engine's functionality is used through its published Python package.
 - **serde**, **serde_json**, and **url** — <https://github.com/serde-rs/serde> and <https://github.com/servo/rust-url>; MIT OR Apache-2.0.
 - **image** — <https://github.com/image-rs/image>; MIT OR Apache-2.0. Aurora uses its PNG decoder for the app icon.
 - **winres** — <https://github.com/mxre/winres>; MIT. It embeds the Windows icon resource during a Windows build.
+- **ureq** — <https://github.com/algesten/ureq>; MIT OR Apache-2.0. Aurora uses its Rustls-backed HTTPS client to update bounded filter-list files.
 - WebView2 is a Microsoft runtime installed separately on Windows. Its redistribution and runtime terms are governed by Microsoft, not this repository's MIT license.
 
 ## Distribution notes

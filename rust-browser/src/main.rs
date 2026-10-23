@@ -1,7 +1,9 @@
 pub mod extensions;
+pub mod privacy;
 pub mod vault;
 
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, RwLock};
 use std::{fs, path::PathBuf};
 use winit::{
     application::ApplicationHandler,
@@ -37,6 +39,7 @@ enum UserEvent {
     ExtensionChanged(Result<(), String>),
     ExtensionInstalled(Result<extensions::ExtensionInfo, String>),
     ExtensionPrepared(Result<(PathBuf, extensions::ExtensionManifest, PathBuf), String>),
+    FilterListsUpdated(Result<(Vec<String>, Arc<adblock::Engine>), String>),
 }
 
 struct BrowserTab {
@@ -45,6 +48,8 @@ struct BrowserTab {
     url: String,
     is_loading: bool,
     first_load_complete: bool,
+    awaiting_first_navigation: bool,
+    privacy_attached: bool,
     is_private: bool,
     view: WebView,
 }
@@ -67,6 +72,12 @@ struct BrowserSettings {
     animations: bool,
     theme: String,
     homepage: String,
+    #[serde(default = "default_adblock_enabled")]
+    adblock_enabled: bool,
+}
+
+fn default_adblock_enabled() -> bool {
+    true
 }
 
 impl Default for BrowserSettings {
@@ -76,6 +87,7 @@ impl Default for BrowserSettings {
             animations: true,
             theme: "dark".into(),
             homepage: "aurora".into(),
+            adblock_enabled: true,
         }
     }
 }
@@ -420,10 +432,12 @@ impl AuroraApp {
         } else {
             url
         };
-        builder = if url == HOME_PAGE && self.settings.homepage == "aurora" {
+        let embedded_home = url == HOME_PAGE && self.settings.homepage == "aurora";
+        builder = if embedded_home {
             builder.with_html(new_tab_html(&self.settings))
         } else {
-            builder.with_url(url)
+            // Register the request filter before asking WebView2 to navigate.
+            builder.with_url("about:blank")
         };
         let builder = builder
             .with_incognito(is_private)
@@ -471,12 +485,25 @@ impl AuroraApp {
         let view = builder
             .build_as_child(window)
             .expect("create Chromium page view");
+        let mut privacy_attached = false;
+        if let Some(state) = self.privacy_state.as_ref() {
+            #[cfg(windows)]
+            match privacy::attach_to_view(&view, state.clone()) {
+                Ok(()) => privacy_attached = true,
+                Err(error) => eprintln!("Aurora privacy filter could not attach: {error}"),
+            }
+        }
+        if !embedded_home {
+            let _ = view.load_url(target_url);
+        }
         self.tabs.push(BrowserTab {
             id,
             title: "Новая вкладка".into(),
             url: target_url.into(),
             is_loading: true,
             first_load_complete: false,
+            awaiting_first_navigation: !embedded_home,
+            privacy_attached,
             is_private,
             view,
         });
@@ -494,6 +521,7 @@ impl AuroraApp {
                 .set_visible(self.layout_ready && tab.id == id && tab.first_load_complete);
         }
         self.refresh_chrome();
+        self.refresh_privacy_panel();
     }
 
     fn reorder_tabs(&mut self, encoded_ids: &str) {
@@ -634,6 +662,34 @@ impl AuroraApp {
         let _ = chrome.evaluate_script(&script);
     }
 
+    fn refresh_privacy_panel(&self) {
+        let Some(overlay) = self.overlay.as_ref() else {
+            return;
+        };
+        let Some(state) = self.privacy_state.as_ref() else {
+            return;
+        };
+        let active = self
+            .active_tab
+            .and_then(|id| self.tabs.iter().find(|tab| tab.id == id));
+        let attached = active.is_some_and(|tab| tab.privacy_attached);
+        let host = active
+            .and_then(|tab| url::Url::parse(&tab.url).ok())
+            .and_then(|url| url.host_str().map(str::to_owned));
+        let host_json = serde_json::to_string(&host).unwrap_or_else(|_| "null".into());
+        let allowed = host.as_deref().is_some_and(|host| state.site_allowed(host));
+        let script = format!(
+            "window.setPrivacy({}, {}, {}, {}, {}, {});",
+            state.is_enabled() && attached,
+            state.blocked_count(),
+            host_json,
+            allowed,
+            self.filter_list_count,
+            attached
+        );
+        let _ = overlay.evaluate_script(&script);
+    }
+
     fn open_overlay(&mut self) {
         if self.overlay.is_none() {
             let (Some(window), Some(context)) = (self.window.as_ref(), self.ui_context.as_mut())
@@ -720,6 +776,7 @@ impl AuroraApp {
             )
         };
         let _ = overlay.evaluate_script(&script);
+        self.refresh_privacy_panel();
     }
 
     fn activate_vault(&mut self, new_vault: vault::ProfileVault) {
@@ -732,11 +789,19 @@ impl AuroraApp {
         let data_dir = new_vault.directory().join("WebView2");
         let _ = fs::create_dir_all(&data_dir);
         self.context = Some(wry::WebContext::new(Some(data_dir)));
-        self.bookmarks = Some(load_vault_records(&new_vault, "bookmarks"));
-        self.history = Some(load_vault_records(&new_vault, "history"));
+        self.active_vault = Some(new_vault);
+        let profile_dir = self
+            .active_vault
+            .as_ref()
+            .expect("vault just set")
+            .directory()
+            .to_path_buf();
+        self.configure_privacy_state(profile_dir.join("privacy-sites.json"));
+        let vault = self.active_vault.as_ref().expect("vault just set");
+        self.bookmarks = Some(load_vault_records(vault, "bookmarks"));
+        self.history = Some(load_vault_records(vault, "history"));
         self.bookmarks_path = None;
         self.history_path = None;
-        self.active_vault = Some(new_vault);
         self.create_tab(HOME_PAGE);
     }
 
@@ -749,12 +814,42 @@ impl AuroraApp {
             return;
         };
         self.context = Some(wry::WebContext::new(Some(data_dir.clone())));
+        self.active_vault = None;
+        self.configure_privacy_state(data_dir.join("privacy-sites.json"));
         self.bookmarks_path = Some(data_dir.join("bookmarks.json"));
         self.history_path = Some(data_dir.join("history.json"));
         self.bookmarks = Some(read_json(&self.bookmarks_path));
         self.history = Some(read_json(&self.history_path));
-        self.active_vault = None;
         self.create_tab(HOME_PAGE);
+    }
+
+    fn configure_privacy_state(&mut self, path: PathBuf) {
+        let allowed: std::collections::HashSet<String> =
+            if let Some(vault) = self.active_vault.as_ref() {
+                vault
+                    .list("privacy-sites")
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .find(|(id, _)| id == "exceptions")
+                    .and_then(|(_, bytes)| serde_json::from_slice(&bytes).ok())
+                    .unwrap_or_default()
+            } else {
+                fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|text| serde_json::from_str(&text).ok())
+                    .unwrap_or_default()
+            };
+        let engine = self
+            .privacy_engine
+            .clone()
+            .unwrap_or_else(|| Arc::new(RwLock::new(Arc::new(privacy::build_engine(&[])))));
+        self.privacy_state = Some(Arc::new(privacy::PrivacyState::new(
+            engine,
+            self.settings.adblock_enabled,
+            allowed,
+        )));
+        self.privacy_path = self.active_vault.is_none().then_some(path);
     }
 }
 
@@ -781,6 +876,10 @@ struct AuroraApp {
     profiles_root: Option<PathBuf>,
     default_data_dir: Option<PathBuf>,
     active_vault: Option<vault::ProfileVault>,
+    privacy_engine: Option<Arc<RwLock<Arc<adblock::Engine>>>>,
+    privacy_state: Option<Arc<privacy::PrivacyState>>,
+    privacy_path: Option<PathBuf>,
+    filter_list_count: usize,
 }
 
 impl ApplicationHandler<UserEvent> for AuroraApp {
@@ -870,6 +969,9 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
         self.history_path = Some(history_path);
         self.settings = settings;
         self.settings_path = Some(settings_path);
+        self.filter_list_count = 0;
+        self.privacy_engine = Some(Arc::new(RwLock::new(Arc::new(privacy::build_engine(&[])))));
+        self.configure_privacy_state(data_dir.join("privacy-sites.json"));
         self.profiles_root = Some(data_dir.parent().unwrap_or(&data_dir).join("Profiles"));
         self.default_data_dir = Some(data_dir.clone());
         self.chrome = Some(chrome);
@@ -877,6 +979,29 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
         self.ui_context = Some(ui_context);
         self.context = Some(context);
         self.create_tab(HOME_PAGE);
+        let update_proxy = self.proxy.as_ref().expect("event loop proxy").clone();
+        let filter_cache = data_dir.join("filter-lists.json");
+        std::thread::spawn(move || {
+            let send_engine = |lists: Vec<String>| {
+                let engine = Arc::new(privacy::build_engine(&lists));
+                let _ = update_proxy.send_event(UserEvent::FilterListsUpdated(Ok((lists, engine))));
+            };
+            let cached = privacy::load_cached_filter_lists(&filter_cache);
+            if !cached.is_empty() {
+                send_engine(cached);
+            }
+            match privacy::download_filter_lists() {
+                Ok(lists) => {
+                    if let Err(error) = write_json_atomically(&filter_cache, &lists) {
+                        eprintln!("Aurora filter list cache write failed: {error}");
+                    }
+                    send_engine(lists);
+                }
+                Err(error) => {
+                    let _ = update_proxy.send_event(UserEvent::FilterListsUpdated(Err(error)));
+                }
+            }
+        });
         let timeout_proxy = self.proxy.as_ref().expect("event loop proxy").clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_secs(12));
@@ -894,6 +1019,22 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                     }
                 }
             }
+            UserEvent::FilterListsUpdated(result) => match result {
+                Ok((lists, replacement)) => {
+                    let mut installed = false;
+                    if let Some(engine) = self.privacy_engine.as_ref() {
+                        if let Ok(mut current) = engine.write() {
+                            *current = replacement;
+                            installed = true;
+                        }
+                    }
+                    if installed {
+                        self.filter_list_count = lists.len();
+                        self.refresh_privacy_panel();
+                    }
+                }
+                Err(error) => eprintln!("Aurora filter list update failed: {error}"),
+            },
             UserEvent::MenuOpen(open) => {
                 if open {
                     self.open_overlay();
@@ -1232,6 +1373,50 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                     self.remove_extension(command.value.as_deref().unwrap_or(""));
                 }
                 "bookmark" => self.save_bookmark(),
+                "privacy_toggle_enabled" => {
+                    if let Some(state) = self.privacy_state.as_ref() {
+                        let enabled = !state.is_enabled();
+                        state.set_enabled(enabled);
+                        self.settings.adblock_enabled = enabled;
+                        if let Some(path) = &self.settings_path {
+                            let _ = write_json_atomically(path, &self.settings);
+                        }
+                        self.refresh_privacy_panel();
+                    }
+                }
+                "privacy_refresh_stats" => self.refresh_privacy_panel(),
+                "privacy_toggle_site" => {
+                    let host = self
+                        .active_tab
+                        .and_then(|id| self.tabs.iter().find(|tab| tab.id == id))
+                        .and_then(|tab| url::Url::parse(&tab.url).ok())
+                        .and_then(|url| url.host_str().map(str::to_owned));
+                    if let (Some(state), Some(host)) = (self.privacy_state.as_ref(), host) {
+                        if state.toggle_site(&host) {
+                            let mut sites: Vec<_> = state.allowed_sites().into_iter().collect();
+                            sites.sort_unstable();
+                            if let Some(vault) = self.active_vault.as_ref() {
+                                if let Ok(bytes) = serde_json::to_vec(&sites) {
+                                    if let Err(error) =
+                                        vault.put("privacy-sites", "exceptions", &bytes)
+                                    {
+                                        eprintln!(
+                                            "Aurora encrypted site exception save failed: {error}"
+                                        );
+                                    }
+                                }
+                            } else if let Some(path) = &self.privacy_path {
+                                if let Err(error) = write_json_atomically(path, &sites) {
+                                    eprintln!("Aurora site exception save failed: {error}");
+                                }
+                            }
+                            if let Some(tab) = self.active_tab_mut() {
+                                let _ = tab.view.evaluate_script("location.reload()");
+                            }
+                            self.refresh_privacy_panel();
+                        }
+                    }
+                }
                 "clear_history" => {
                     if let Some(history) = self.history.as_mut() {
                         history.clear();
@@ -1276,6 +1461,11 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                             if matches!(value, "aurora" | "duckduckgo") {
                                 self.settings.homepage = value.to_owned();
                             }
+                        } else if let Some(value) = value.strip_prefix("adblock_enabled=") {
+                            self.settings.adblock_enabled = value == "true";
+                            if let Some(state) = self.privacy_state.as_ref() {
+                                state.set_enabled(self.settings.adblock_enabled);
+                            }
                         }
                         if let Some(path) = &self.settings_path {
                             let _ = write_json_atomically(path, &self.settings);
@@ -1301,6 +1491,7 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                             let _ = tab.view.set_background_color(page_background);
                         }
                         self.update_overlay(false);
+                        self.refresh_privacy_panel();
                     }
                 }
                 "select_tab" => {
@@ -1369,8 +1560,12 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
             }
             UserEvent::PageLoaded(id, url) => {
                 if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) {
+                    if url == "about:blank" && tab.awaiting_first_navigation {
+                        return;
+                    }
                     tab.is_loading = false;
                     tab.first_load_complete = true;
+                    tab.awaiting_first_navigation = false;
                     tab.url = if url == "about:blank" {
                         HOME_PAGE.into()
                     } else {
@@ -1395,6 +1590,7 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                         }
                     }
                     self.record_history(id, url);
+                    self.refresh_privacy_panel();
                 }
             }
         }
@@ -1486,7 +1682,33 @@ fn write_json_atomically<T: Serialize>(path: &std::path::Path, value: &T) -> std
     let mut temporary = path.as_os_str().to_owned();
     temporary.push(".tmp");
     let temporary = PathBuf::from(temporary);
-    fs::write(&temporary, json)?;
+    use std::io::Write;
+    let mut file = fs::File::create(&temporary)?;
+    file.write_all(&json)?;
+    file.sync_all()?;
+    drop(file);
+    #[cfg(windows)]
+    {
+        use windows::{
+            Win32::Storage::FileSystem::{
+                MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+            },
+            core::HSTRING,
+        };
+        let source = HSTRING::from(temporary.as_path());
+        let destination = HSTRING::from(path);
+        if let Err(error) = unsafe {
+            MoveFileExW(
+                &source,
+                &destination,
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        } {
+            let _ = fs::remove_file(&temporary);
+            return Err(std::io::Error::other(error));
+        }
+    }
+    #[cfg(not(windows))]
     if let Err(error) = fs::rename(&temporary, path) {
         let _ = fs::remove_file(&temporary);
         return Err(error);

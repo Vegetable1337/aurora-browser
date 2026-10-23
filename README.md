@@ -43,9 +43,10 @@ Aurora — экспериментальный настольный браузе�
 - Список посещений, очистка журнала, загрузки в папку Downloads.
 - Страница новой вкладки Aurora, меню библиотеки и настройки темы, поисковика, стартовой страницы и анимаций.
 - Экспериментальный менеджер локальных распакованных расширений Chrome Manifest V3: копирование в отдельное хранилище профиля, просмотр разрешений и установка/включение/отключение/удаление.
+- Сетевой блокировщик Brave adblock-rust: встроенные базовые правила, обновляемые списки EasyList/EasyPrivacy, исключение для текущего сайта и счётчик реальных заблокированных HTTP(S)-запросов.
 - Логотип Aurora и Windows-иконка приложения.
 
-Расширения используют ограниченную интеграцию WebView2, а не полный API Chrome. Firefox, Chrome Web Store и всплывающие окна действий расширений не поддерживаются или не проверены. Блокировка трекеров и управление разрешениями сайтов в Rust ещё не реализованы. Шифрование защищённых профилей покрывает данные Aurora, но не файлы WebView2, включая cookies, кэш и данные расширений.
+Расширения используют ограниченную интеграцию WebView2, а не полный API Chrome. Firefox, Chrome Web Store и всплывающие окна действий расширений не поддерживаются или не проверены. Фильтр обрабатывает запросы HTTP(S), которые WebView2 передаёт через `WebResourceRequested`; он не фильтрует DNS, служебный трафик WebView2 и косметические элементы страницы. Для фреймов источник запроса определяется по адресу верхней страницы. Это не полная анонимность и не гарантия блокировки всех трекеров. Шифрование защищённых профилей покрывает данные Aurora, но не файлы WebView2, включая cookies, кэш и данные расширений.
 
 ### Запуск Python-версии
 
@@ -128,9 +129,10 @@ Aurora is an experimental Windows desktop browser project focused on privacy and
 - Visit list, history clearing, and downloads to the Downloads folder.
 - Aurora new-tab page, library menu, and settings for theme, search provider, start page, and animations.
 - An experimental manager for local unpacked Chrome Manifest V3 extensions, with a profile-owned copy, a declared-permissions review, and install/enable/disable/remove controls.
+- Brave adblock-rust network filtering with built-in fallback rules, EasyList/EasyPrivacy refresh at startup, per-site exceptions, and a counter of actual blocked HTTP(S) requests.
 - Aurora logo and Windows application icon.
 
-Extensions use a limited WebView2 integration, not the complete Chrome API. Firefox packages, Chrome Web Store installation, and extension action popups are unsupported or unverified. Tracker blocking and website permission management are not implemented in Rust. Protected profiles encrypt Aurora-owned bookmarks/history, but not WebView2 profile files, including cookies, cache, and extension data.
+Extensions use a limited WebView2 integration, not the complete Chrome API. Firefox packages, Chrome Web Store installation, and extension action popups are unsupported or unverified. The filter handles HTTP(S) requests surfaced through WebView2 `WebResourceRequested`; it does not filter DNS, WebView2 internal traffic, or cosmetic page elements. Frame source matching uses the top-level page URL. This is not full anonymity or a guarantee against every tracker. Protected profiles encrypt Aurora-owned bookmarks/history and their site exceptions, but not WebView2 profile files, including cookies, cache, and extension data.
 
 ### Run the Python version
 
@@ -213,9 +215,10 @@ Aurora 是一个面向 Windows 的实验性桌面浏览器项目，注重隐私�
 - 访问记录、清除历史，以及下载到 Downloads 文件夹。
 - Aurora 新标签页、资料库菜单，以及主题、搜索引擎、起始页和动画设置。
 - 实验性的 Chrome Manifest V3 本地解压扩展管理器：复制到当前配置文件的独立目录、安装前显示声明的权限，并支持启用、停用和移除。
+- 基于 Brave adblock-rust 的网络请求过滤：内置基础规则、启动时更新 EasyList/EasyPrivacy、当前网站例外，以及真实 HTTP(S) 屏蔽请求计数。
 - Aurora 标志和 Windows 应用图标。
 
-扩展功能是有限的 WebView2 集成，并不等于完整 Chrome API。Firefox 扩展、Chrome 网上应用店安装和扩展操作弹窗尚不支持或未验证。Rust 版尚未实现跟踪器拦截和网站权限管理。受保护配置文件仅加密 Aurora 书签和历史记录，不加密 WebView2 数据，包括 Cookie、缓存和扩展数据。
+扩展功能是有限的 WebView2 集成，并不等于完整 Chrome API。Firefox 扩展、Chrome 网上应用店安装和扩展操作弹窗尚不支持或未验证。过滤器处理 WebView2 `WebResourceRequested` 提供的 HTTP(S) 请求，不处理 DNS、WebView2 内部流量或页面元素隐藏；框架来源按顶层页面 URL 判断。这不代表完全匿名，也不保证拦截所有跟踪器。受保护配置文件会加密 Aurora 书签、历史记录和网站例外，但不会加密 WebView2 数据，包括 Cookie、缓存和扩展数据。
 
 ### 运行 Python 版本
 
