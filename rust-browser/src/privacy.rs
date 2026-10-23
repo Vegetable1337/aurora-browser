@@ -5,7 +5,7 @@
 //! request handled below that event by the runtime.
 
 use adblock::{Engine, FilterSet, lists::ParseOptions, request::Request};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
 use std::sync::{
     Arc, Mutex, RwLock,
@@ -18,6 +18,7 @@ pub struct PrivacyState {
     engine: Arc<RwLock<Arc<Engine>>>,
     enabled: AtomicBool,
     blocked: AtomicU64,
+    blocked_sites: Mutex<BTreeMap<String, u64>>,
     allowed_sites: Mutex<HashSet<String>>,
 }
 
@@ -31,6 +32,7 @@ impl PrivacyState {
             engine,
             enabled: AtomicBool::new(enabled),
             blocked: AtomicU64::new(0),
+            blocked_sites: Mutex::new(BTreeMap::new()),
             allowed_sites: Mutex::new(allowed_sites),
         }
     }
@@ -45,6 +47,14 @@ impl PrivacyState {
 
     pub fn blocked_count(&self) -> u64 {
         self.blocked.load(Ordering::Relaxed)
+    }
+
+    pub fn blocked_for_origin(&self, origin: &str) -> u64 {
+        self.blocked_sites
+            .lock()
+            .ok()
+            .and_then(|m| m.get(origin).copied())
+            .unwrap_or(0)
     }
 
     pub fn site_allowed(&self, host: &str) -> bool {
@@ -92,11 +102,17 @@ impl PrivacyState {
         let Ok(engine) = self.engine.read() else {
             return false;
         };
-        let blocked = engine.check_network_request(&request).should_block();
-        if blocked {
-            self.blocked.fetch_add(1, Ordering::Relaxed);
+        engine.check_network_request(&request).should_block()
+    }
+
+    /// Record only after WebView2 accepted the replacement response.
+    pub fn confirm_blocked(&self, source: &str) {
+        self.blocked.fetch_add(1, Ordering::Relaxed);
+        if let Some(origin) = crate::site_permissions::origin(source)
+            && let Ok(mut counts) = self.blocked_sites.lock()
+        {
+            *counts.entry(origin).or_default() += 1;
         }
-        blocked
     }
 }
 
@@ -174,6 +190,7 @@ pub fn attach_to_view(view: &wry::WebView, state: Arc<PrivacyState>) -> Result<(
                     &HSTRING::from("Content-Length: 0\r\nCache-Control: no-store\r\n"),
                 )?;
                 args.SetResponse(&response)?;
+                state.confirm_blocked(&source);
             }
         }
         Ok(())
@@ -303,7 +320,11 @@ mod tests {
             "xmlhttprequest",
             "GET"
         ));
+        assert_eq!(state.blocked_count(), 0);
+        state.confirm_blocked("https://news.example/");
         assert_eq!(state.blocked_count(), 1);
+        assert_eq!(state.blocked_for_origin("https://news.example"), 1);
+        assert_eq!(state.blocked_for_origin("http://news.example"), 0);
         assert!(!state.should_block(
             "https://cdn.example/app.js",
             "https://news.example/",
@@ -361,7 +382,11 @@ mod tests {
             "script",
             "GET"
         ));
+        assert_eq!(state.blocked_count(), 0);
+        state.confirm_blocked("https://news.example/");
         assert_eq!(state.blocked_count(), 1);
+        assert_eq!(state.blocked_for_origin("https://news.example"), 1);
+        assert_eq!(state.blocked_for_origin("http://news.example"), 0);
     }
 
     #[test]

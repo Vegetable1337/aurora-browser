@@ -1,6 +1,4 @@
-pub mod extensions;
-pub mod privacy;
-pub mod vault;
+use aurora_browser::{extensions, privacy, site_permissions, vault};
 
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
@@ -14,7 +12,7 @@ use winit::{
 };
 #[cfg(windows)]
 use wry::WebViewBuilderExtWindows;
-use wry::{PageLoadEvent, PermissionResponse, Rect, WebView, WebViewBuilder, dpi::LogicalPosition};
+use wry::{PageLoadEvent, Rect, WebView, WebViewBuilder, dpi::LogicalPosition};
 
 const CHROME_HEIGHT: u32 = 104;
 const HOME_PAGE: &str = "about:aurora";
@@ -29,6 +27,8 @@ struct BrowserCommand {
 enum UserEvent {
     Command(BrowserCommand),
     StartupTimeout,
+    PermissionsReady(u64, Result<(), String>),
+    LegacyPermissions(u64, Result<Vec<site_permissions::LegacyPermission>, String>),
     PageTitle(u64, String),
     PageLoading(u64, bool),
     PageLoaded(u64, String),
@@ -50,6 +50,9 @@ struct BrowserTab {
     first_load_complete: bool,
     awaiting_first_navigation: bool,
     privacy_attached: bool,
+    permissions: site_permissions::SharedPolicy,
+    permission_gate: Arc<std::sync::atomic::AtomicBool>,
+    privacy: Arc<privacy::PrivacyState>,
     is_private: bool,
     view: WebView,
 }
@@ -197,12 +200,11 @@ impl AuroraApp {
         let proxy = self.proxy.as_ref().expect("event loop proxy").clone();
         if let Err(error) = extensions::list_extensions(view, registry, move |result| {
             let _ = proxy.send_event(UserEvent::ExtensionsListed(result));
-        }) {
-            if let Some(overlay) = self.overlay.as_ref() {
-                let message = serde_json::to_string(&error)
-                    .unwrap_or_else(|_| "\"Не удалось получить список расширений\"".into());
-                let _ = overlay.evaluate_script(&format!("window.showExtensionError({message})"));
-            }
+        }) && let Some(overlay) = self.overlay.as_ref()
+        {
+            let message = serde_json::to_string(&error)
+                .unwrap_or_else(|_| "\"Не удалось получить список расширений\"".into());
+            let _ = overlay.evaluate_script(&format!("window.showExtensionError({message})"));
         }
     }
 
@@ -422,6 +424,12 @@ impl AuroraApp {
         } else {
             WebViewBuilder::new_with_web_context(self.context.as_mut().expect("checked context"))
         };
+        let permission_ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let navigation_ready = permission_ready.clone();
+        builder = builder.with_navigation_handler(move |url| {
+            site_permissions::origin(&url).is_none()
+                || navigation_ready.load(std::sync::atomic::Ordering::Acquire)
+        });
         let page_background = if self.settings.theme == "light" {
             (234, 240, 249, 255)
         } else {
@@ -441,7 +449,6 @@ impl AuroraApp {
         };
         let builder = builder
             .with_incognito(is_private)
-            .with_permission_handler(|_| PermissionResponse::Default)
             .with_focused(false)
             .with_visible(false)
             .with_background_color(page_background)
@@ -485,16 +492,38 @@ impl AuroraApp {
         let view = builder
             .build_as_child(window)
             .expect("create Chromium page view");
+        let permissions = if is_private {
+            Arc::new(RwLock::new(site_permissions::Policy::default()))
+        } else {
+            self.permissions.clone()
+        };
+        #[cfg(windows)]
+        site_permissions::attach(&view, permissions.clone())
+            .expect("attach origin permission policy");
         let mut privacy_attached = false;
-        if let Some(state) = self.privacy_state.as_ref() {
+        let tab_privacy = if is_private {
+            Arc::new(privacy::PrivacyState::new(
+                self.privacy_engine.clone().expect("privacy engine"),
+                self.settings.adblock_enabled,
+                Default::default(),
+            ))
+        } else {
+            self.privacy_state.clone().expect("profile privacy")
+        };
+        {
+            let state = &tab_privacy;
             #[cfg(windows)]
             match privacy::attach_to_view(&view, state.clone()) {
                 Ok(()) => privacy_attached = true,
                 Err(error) => eprintln!("Aurora privacy filter could not attach: {error}"),
             }
         }
-        if !embedded_home {
-            let _ = view.load_url(target_url);
+        let permission_proxy = self.proxy.as_ref().expect("event loop proxy").clone();
+        #[cfg(windows)]
+        if let Err(error) = site_permissions::read_legacy(&view, move |result| {
+            let _ = permission_proxy.send_event(UserEvent::LegacyPermissions(id, result));
+        }) {
+            eprintln!("Aurora permission initialization failed; navigation blocked: {error}");
         }
         self.tabs.push(BrowserTab {
             id,
@@ -504,6 +533,9 @@ impl AuroraApp {
             first_load_complete: false,
             awaiting_first_navigation: !embedded_home,
             privacy_attached,
+            permissions,
+            permission_gate: permission_ready,
+            privacy: tab_privacy,
             is_private,
             view,
         });
@@ -672,6 +704,7 @@ impl AuroraApp {
         let active = self
             .active_tab
             .and_then(|id| self.tabs.iter().find(|tab| tab.id == id));
+        let state = active.map(|tab| &tab.privacy).unwrap_or(state);
         let attached = active.is_some_and(|tab| tab.privacy_attached);
         let host = active
             .and_then(|tab| url::Url::parse(&tab.url).ok())
@@ -688,6 +721,30 @@ impl AuroraApp {
             attached
         );
         let _ = overlay.evaluate_script(&script);
+        let origin = active.and_then(|tab| site_permissions::origin(&tab.url));
+        let choices: Vec<_> = site_permissions::KINDS
+            .iter()
+            .map(|kind| {
+                let decision = active
+                    .and_then(|tab| {
+                        tab.permissions
+                            .read()
+                            .ok()
+                            .map(|p| p.decision(origin.as_deref().unwrap_or(""), kind))
+                    })
+                    .unwrap_or_default();
+                serde_json::json!({"kind":kind,"decision":decision})
+            })
+            .collect();
+        let connection = match origin.as_deref() {
+            Some(o) if o.starts_with("https:") => {
+                "Адрес HTTPS. TLS проверяет WebView2; сведения о сертификате и смешанном содержимом здесь не получены."
+            }
+            Some(_) => "Адрес HTTP: соединение не защищено TLS.",
+            None => "Внутренняя страница. Разрешения сайта недоступны.",
+        };
+        let snapshot = serde_json::json!({"origin":origin.clone(),"tabId":active.map(|t|t.id),"permissionReady":active.is_some_and(|t|t.permission_gate.load(std::sync::atomic::Ordering::Acquire)),"connection":connection,"permissions":choices,"private":active.is_some_and(|t|t.is_private),"blockedSite":origin.as_deref().map(|o|state.blocked_for_origin(o)).unwrap_or(0)});
+        let _ = overlay.evaluate_script(&format!("window.setSitePrivacy({snapshot})"));
     }
 
     fn open_overlay(&mut self) {
@@ -824,6 +881,22 @@ impl AuroraApp {
     }
 
     fn configure_privacy_state(&mut self, path: PathBuf) {
+        let policy = if let Some(vault) = self.active_vault.as_ref() {
+            vault
+                .list("site-permissions")
+                .ok()
+                .into_iter()
+                .flatten()
+                .find(|(id, _)| id == "policy")
+                .and_then(|(_, bytes)| serde_json::from_slice(&bytes).ok())
+                .unwrap_or_default()
+        } else {
+            fs::read(path.with_file_name("site-permissions.json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .unwrap_or_default()
+        };
+        self.permissions = Arc::new(RwLock::new(policy));
         let allowed: std::collections::HashSet<String> =
             if let Some(vault) = self.active_vault.as_ref() {
                 vault
@@ -880,6 +953,7 @@ struct AuroraApp {
     privacy_state: Option<Arc<privacy::PrivacyState>>,
     privacy_path: Option<PathBuf>,
     filter_list_count: usize,
+    permissions: site_permissions::SharedPolicy,
 }
 
 impl ApplicationHandler<UserEvent> for AuroraApp {
@@ -1011,22 +1085,100 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::StartupTimeout => {
-                if !self.window_shown {
-                    if let Some(window) = self.window.as_ref() {
-                        window.set_visible(true);
-                        self.window_shown = true;
+            UserEvent::LegacyPermissions(id, result) => {
+                let Some(tab) = self.tabs.iter().find(|t| t.id == id) else {
+                    return;
+                };
+                let migrated = (|| -> Result<Vec<site_permissions::LegacyPermission>, String> {
+                    let settings = result?;
+                    if !settings.is_empty() && !tab.is_private {
+                        let mut policy = tab
+                            .permissions
+                            .read()
+                            .map_err(|_| "Permission policy locked")?
+                            .clone();
+                        policy.import_legacy(&settings);
+                        if let Some(vault) = self.active_vault.as_ref() {
+                            vault
+                                .put(
+                                    "site-permissions",
+                                    &format!("legacy-{}", uuid::Uuid::new_v4()),
+                                    &serde_json::to_vec(&settings).map_err(|e| e.to_string())?,
+                                )
+                                .map_err(|e| e.to_string())?;
+                            vault
+                                .put(
+                                    "site-permissions",
+                                    "policy",
+                                    &serde_json::to_vec(&policy).map_err(|e| e.to_string())?,
+                                )
+                                .map_err(|e| e.to_string())?;
+                        } else if let Some(root) = self.default_data_dir.as_ref() {
+                            write_json_atomically(
+                                &root.join(format!(
+                                    "legacy-permissions-{}.json",
+                                    uuid::Uuid::new_v4()
+                                )),
+                                &settings,
+                            )
+                            .map_err(|e| e.to_string())?;
+                            write_json_atomically(&root.join("site-permissions.json"), &policy)
+                                .map_err(|e| e.to_string())?;
+                        }
+                        *tab.permissions
+                            .write()
+                            .map_err(|_| "Permission policy locked")? = policy;
                     }
+                    Ok(settings)
+                })();
+                match migrated {
+                    Ok(settings) => {
+                        let proxy = self.proxy.as_ref().unwrap().clone();
+                        if let Err(error) =
+                            site_permissions::reset_legacy(&tab.view, settings, move |result| {
+                                let _ = proxy.send_event(UserEvent::PermissionsReady(id, result));
+                            })
+                        {
+                            eprintln!(
+                                "Aurora native permission reset failed; navigation blocked: {error}"
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("Aurora permission migration failed; navigation blocked: {error}")
+                    }
+                }
+            }
+            UserEvent::PermissionsReady(id, result) => match result {
+                Ok(()) => {
+                    if let Some(tab) = self.tabs.iter().find(|t| t.id == id) {
+                        tab.permission_gate
+                            .store(true, std::sync::atomic::Ordering::Release);
+                        if tab.url != HOME_PAGE {
+                            let _ = tab.view.load_url(&tab.url);
+                        }
+                    }
+                }
+                Err(error) => eprintln!(
+                    "Aurora permission initialization failed; navigation blocked: {error}"
+                ),
+            },
+            UserEvent::StartupTimeout => {
+                if !self.window_shown
+                    && let Some(window) = self.window.as_ref()
+                {
+                    window.set_visible(true);
+                    self.window_shown = true;
                 }
             }
             UserEvent::FilterListsUpdated(result) => match result {
                 Ok((lists, replacement)) => {
                     let mut installed = false;
-                    if let Some(engine) = self.privacy_engine.as_ref() {
-                        if let Ok(mut current) = engine.write() {
-                            *current = replacement;
-                            installed = true;
-                        }
+                    if let Some(engine) = self.privacy_engine.as_ref()
+                        && let Ok(mut current) = engine.write()
+                    {
+                        *current = replacement;
+                        installed = true;
                     }
                     if installed {
                         self.filter_list_count = lists.len();
@@ -1377,12 +1529,86 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                     if let Some(state) = self.privacy_state.as_ref() {
                         let enabled = !state.is_enabled();
                         state.set_enabled(enabled);
+                        for tab in &self.tabs {
+                            tab.privacy.set_enabled(enabled);
+                        }
                         self.settings.adblock_enabled = enabled;
                         if let Some(path) = &self.settings_path {
                             let _ = write_json_atomically(path, &self.settings);
                         }
                         self.refresh_privacy_panel();
                     }
+                }
+                "site_permission_set" | "site_permission_reset" => {
+                    let Some(tab) = self
+                        .active_tab
+                        .and_then(|id| self.tabs.iter().find(|t| t.id == id))
+                    else {
+                        return;
+                    };
+                    let Some(origin) = site_permissions::origin(&tab.url) else {
+                        return;
+                    };
+                    if !tab
+                        .permission_gate
+                        .load(std::sync::atomic::Ordering::Acquire)
+                    {
+                        self.refresh_privacy_panel();
+                        return;
+                    }
+                    let policy = tab.permissions.clone();
+                    let result = (|| -> Result<(), String> {
+                        let mut next = policy.read().map_err(|_| "Политика недоступна")?.clone();
+                        let value: serde_json::Value =
+                            serde_json::from_str(command.value.as_deref().unwrap_or(""))
+                                .map_err(|_| "Некорректная команда")?;
+                        if value["tabId"].as_u64() != Some(tab.id)
+                            || value["origin"].as_str() != Some(origin.as_str())
+                        {
+                            return Err("Вкладка изменилась; обновите панель".into());
+                        }
+                        if command.action == "site_permission_reset" {
+                            next.reset(&origin);
+                        } else {
+                            // Reject a delayed UI command after switching to another origin.
+                            if value["origin"].as_str() != Some(origin.as_str()) {
+                                return Err("Сайт изменился; обновите панель".into());
+                            }
+                            let decision = serde_json::from_value(value["decision"].clone())
+                                .map_err(|_| "Некорректное решение")?;
+                            next.set(&origin, value["kind"].as_str().unwrap_or(""), decision)?;
+                        }
+                        if !tab.is_private {
+                            if let Some(vault) = self.active_vault.as_ref() {
+                                let bytes = serde_json::to_vec(&next).map_err(|e| e.to_string())?;
+                                vault
+                                    .put("site-permissions", "policy", &bytes)
+                                    .map_err(|e| e.to_string())?;
+                            } else if let Some(path) = self.default_data_dir.as_ref() {
+                                write_json_atomically(&path.join("site-permissions.json"), &next)
+                                    .map_err(|e| e.to_string())?;
+                            }
+                        }
+                        *policy.write().map_err(|_| "Политика недоступна")? = next;
+                        Ok(())
+                    })();
+                    if let Err(error) = result {
+                        if let Some(overlay) = self.overlay.as_ref() {
+                            let message = serde_json::to_string(&error).unwrap();
+                            let _ = overlay
+                                .evaluate_script(&format!("window.sitePrivacyError({message})"));
+                        }
+                    } else {
+                        // Reload closes existing media streams; the next request uses the new policy.
+                        for tab in &self.tabs {
+                            if Arc::ptr_eq(&tab.permissions, &policy)
+                                && site_permissions::origin(&tab.url).as_deref() == Some(&origin)
+                            {
+                                let _ = tab.view.evaluate_script("location.reload()");
+                            }
+                        }
+                    }
+                    self.refresh_privacy_panel();
                 }
                 "privacy_refresh_stats" => self.refresh_privacy_panel(),
                 "privacy_toggle_site" => {
@@ -1391,30 +1617,33 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                         .and_then(|id| self.tabs.iter().find(|tab| tab.id == id))
                         .and_then(|tab| url::Url::parse(&tab.url).ok())
                         .and_then(|url| url.host_str().map(str::to_owned));
-                    if let (Some(state), Some(host)) = (self.privacy_state.as_ref(), host) {
-                        if state.toggle_site(&host) {
-                            let mut sites: Vec<_> = state.allowed_sites().into_iter().collect();
-                            sites.sort_unstable();
-                            if let Some(vault) = self.active_vault.as_ref() {
-                                if let Ok(bytes) = serde_json::to_vec(&sites) {
-                                    if let Err(error) =
-                                        vault.put("privacy-sites", "exceptions", &bytes)
-                                    {
-                                        eprintln!(
-                                            "Aurora encrypted site exception save failed: {error}"
-                                        );
-                                    }
-                                }
-                            } else if let Some(path) = &self.privacy_path {
-                                if let Err(error) = write_json_atomically(path, &sites) {
-                                    eprintln!("Aurora site exception save failed: {error}");
-                                }
+                    let tab = self
+                        .active_tab
+                        .and_then(|id| self.tabs.iter().find(|t| t.id == id));
+                    let private = tab.is_some_and(|t| t.is_private);
+                    let state = tab.map(|t| &t.privacy);
+                    if let (Some(state), Some(host)) = (state, host)
+                        && state.toggle_site(&host)
+                    {
+                        let mut sites: Vec<_> = state.allowed_sites().into_iter().collect();
+                        sites.sort_unstable();
+                        if private {
+                            // Private exceptions remain in this tab only.
+                        } else if let Some(vault) = self.active_vault.as_ref() {
+                            if let Ok(bytes) = serde_json::to_vec(&sites)
+                                && let Err(error) = vault.put("privacy-sites", "exceptions", &bytes)
+                            {
+                                eprintln!("Aurora encrypted site exception save failed: {error}");
                             }
-                            if let Some(tab) = self.active_tab_mut() {
-                                let _ = tab.view.evaluate_script("location.reload()");
-                            }
-                            self.refresh_privacy_panel();
+                        } else if let Some(path) = &self.privacy_path
+                            && let Err(error) = write_json_atomically(path, &sites)
+                        {
+                            eprintln!("Aurora site exception save failed: {error}");
                         }
+                        if let Some(tab) = self.active_tab_mut() {
+                            let _ = tab.view.evaluate_script("location.reload()");
+                        }
+                        self.refresh_privacy_panel();
                     }
                 }
                 "clear_history" => {
@@ -1465,6 +1694,9 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                             self.settings.adblock_enabled = value == "true";
                             if let Some(state) = self.privacy_state.as_ref() {
                                 state.set_enabled(self.settings.adblock_enabled);
+                                for tab in &self.tabs {
+                                    tab.privacy.set_enabled(self.settings.adblock_enabled);
+                                }
                             }
                         }
                         if let Some(path) = &self.settings_path {
@@ -1536,12 +1768,11 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                     };
                     let current_title = tab.title.clone();
                     let current_url = tab.url.clone();
-                    if let Some(history) = self.history.as_mut() {
-                        if let Some(entry) =
+                    if let Some(history) = self.history.as_mut()
+                        && let Some(entry) =
                             history.iter_mut().find(|entry| entry.url == current_url)
-                        {
-                            entry.title = current_title;
-                        }
+                    {
+                        entry.title = current_title;
                     }
                     if let Some(vault) = self.active_vault.as_ref() {
                         persist_vault_records(
@@ -1571,22 +1802,22 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                     } else {
                         url.clone()
                     };
-                    if self.active_tab == Some(id) {
-                        if let Some(window) = self.window.as_ref() {
-                            let size = window.inner_size().to_logical::<u32>(window.scale_factor());
-                            let _ = tab.view.set_bounds(Rect {
-                                position: LogicalPosition::new(0, CHROME_HEIGHT).into(),
-                                size: LogicalSize::new(
-                                    size.width,
-                                    size.height.saturating_sub(CHROME_HEIGHT),
-                                )
-                                .into(),
-                            });
-                            let _ = tab.view.set_visible(true);
-                            if !self.window_shown {
-                                window.set_visible(true);
-                                self.window_shown = true;
-                            }
+                    if self.active_tab == Some(id)
+                        && let Some(window) = self.window.as_ref()
+                    {
+                        let size = window.inner_size().to_logical::<u32>(window.scale_factor());
+                        let _ = tab.view.set_bounds(Rect {
+                            position: LogicalPosition::new(0, CHROME_HEIGHT).into(),
+                            size: LogicalSize::new(
+                                size.width,
+                                size.height.saturating_sub(CHROME_HEIGHT),
+                            )
+                            .into(),
+                        });
+                        let _ = tab.view.set_visible(true);
+                        if !self.window_shown {
+                            window.set_visible(true);
+                            self.window_shown = true;
                         }
                     }
                     self.record_history(id, url);
@@ -1637,14 +1868,13 @@ impl ApplicationHandler<UserEvent> for AuroraApp {
                     // the final child bounds, avoiding a white stale-size flash.
                     if !self.layout_ready {
                         self.layout_ready = true;
-                        if let Some(active_id) = self.active_tab {
-                            if let Some(tab) = self
+                        if let Some(active_id) = self.active_tab
+                            && let Some(tab) = self
                                 .tabs
                                 .iter()
                                 .find(|tab| tab.id == active_id && tab.first_load_complete)
-                            {
-                                let _ = tab.view.set_visible(true);
-                            }
+                        {
+                            let _ = tab.view.set_visible(true);
                         }
                     }
                 }
@@ -1804,6 +2034,30 @@ fn is_trusted_ui_navigation(url: &str, html: &str) -> bool {
     }
 }
 
+fn new_tab_html(settings: &BrowserSettings) -> String {
+    let action = if settings.search_engine == "google" {
+        "https://www.google.com/search"
+    } else {
+        "https://duckduckgo.com/"
+    };
+    let html = NEW_TAB_HTML
+        .replace("{{AURORA_LOGO}}", AURORA_LOGO_SVG)
+        .replace("https://search.aurora.invalid/", action);
+    if settings.theme == "light" {
+        html.replace("<html lang=\"ru\">", "<html lang=\"ru\" class=\"light\">")
+    } else {
+        html
+    }
+}
+
+fn browser_icon() -> Icon {
+    let image = image::load_from_memory(include_bytes!("../assets/aurora.png"))
+        .expect("load Aurora window icon")
+        .to_rgba8();
+    let (width, height) = image.dimensions();
+    Icon::from_rgba(image.into_raw(), width, height).expect("create Aurora window icon")
+}
+
 #[cfg(test)]
 mod ui_navigation_tests {
     use super::*;
@@ -1833,28 +2087,4 @@ mod ui_navigation_tests {
             }
         }
     }
-}
-
-fn new_tab_html(settings: &BrowserSettings) -> String {
-    let action = if settings.search_engine == "google" {
-        "https://www.google.com/search"
-    } else {
-        "https://duckduckgo.com/"
-    };
-    let html = NEW_TAB_HTML
-        .replace("{{AURORA_LOGO}}", AURORA_LOGO_SVG)
-        .replace("https://search.aurora.invalid/", action);
-    if settings.theme == "light" {
-        html.replace("<html lang=\"ru\">", "<html lang=\"ru\" class=\"light\">")
-    } else {
-        html
-    }
-}
-
-fn browser_icon() -> Icon {
-    let image = image::load_from_memory(include_bytes!("../assets/aurora.png"))
-        .expect("load Aurora window icon")
-        .to_rgba8();
-    let (width, height) = image.dimensions();
-    Icon::from_rgba(image.into_raw(), width, height).expect("create Aurora window icon")
 }
