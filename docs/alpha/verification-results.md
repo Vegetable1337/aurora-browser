@@ -45,8 +45,11 @@ making the loaded first tab visible, then shows it through a separate event so
 the UI thread does not sleep. Three immediate captures after the window became
 visible showed the complete page. This adds up to one second to initial window
 presentation; the existing 12-second fallback still shows the window if startup
-does not complete. The capture verifies rendering only; UIA still cannot operate
-the HTML controls, so it does not replace the manual interaction checklist.
+does not complete. The capture script can seed only its disposable profile with
+light or dark theme settings; both actual window captures rendered the expected
+Aurora start page (`main-window.png` and `main-window-light.png`). The capture
+verifies rendering only; UIA still cannot operate the HTML controls, so it does
+not replace the manual interaction checklist.
 
 ## Windows Alpha packaging
 

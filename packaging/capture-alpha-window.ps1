@@ -2,7 +2,9 @@ param(
     [string]$ExePath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'rust-browser\target\release\aurora-browser.exe'),
     [string]$OutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'docs\alpha\evidence\main-window.png'),
     [int]$TimeoutSeconds = 30,
-    [int]$StableDelaySeconds = 3
+    [int]$StableDelaySeconds = 0,
+    [ValidateSet('dark', 'light')]
+    [string]$Theme = 'dark'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,6 +27,16 @@ $environmentValues = @{
     TMP = $sandbox
     PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
 }
+$settingsDirectory = Join-Path $environmentValues.LOCALAPPDATA 'Aurora\Rust\Default'
+New-Item -ItemType Directory -Path $settingsDirectory -Force | Out-Null
+@{
+    search_engine = 'duckduckgo'
+    animations = $true
+    theme = $Theme
+    homepage = 'aurora'
+    adblock_enabled = $true
+    https_first = $true
+} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $settingsDirectory 'settings.json') -Encoding utf8
 $oldEnvironment = @{}
 $process = $null
 $window = $null
@@ -96,6 +108,7 @@ try {
         IsOffscreen = $window.Current.IsOffscreen
         RustToolchainAvailableToProcess = $false
         Profile = 'Disposable temporary profile'
+        Theme = $Theme
     } | ConvertTo-Json -Depth 3
 }
 finally {
