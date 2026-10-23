@@ -1,0 +1,11 @@
+{
+  "InstallerVersion": "0.1.0-alpha",
+  "FirstInstall": "passed",
+  "RepeatInstall": "passed",
+  "StartMenuShortcut": "passed",
+  "WindowsUninstallRegistration": "passed",
+  "Uninstall": "passed",
+  "UserDataRootSeparateFromInstall": true,
+  "ProfileDataPreservation": "Not exercised against an isolated Windows user profile.",
+  "Scope": "Disposable custom install directory under TEMP; no browser process was running."
+}

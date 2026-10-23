@@ -39,20 +39,27 @@ its disposable profile using bounded retries for delayed WebView2 file release.
 - Release launch smoke used a disposable `LOCALAPPDATA`, removed Rust toolchain
   directories from `PATH`, found a visible Aurora window without a console, and
   observed clean exit after Win32 `WM_CLOSE`.
-- Inno Setup 6.7.3 compiled the per-user installer. Earlier isolated smoke
-  exercised install, repeat install, Start menu/desktop shortcut handling, and
-  uninstall. It did not use a clean Windows VM, and the install smoke was not
-  rerun after the later PE-subsystem-only change.
+- Inno Setup 6.7.3 compiled the per-user installer. A final smoke on the current
+  installer passed first install, repeat install, Start menu shortcut and Windows
+  uninstall registration checks, and cleanup through its uninstaller. It used a
+  unique custom install directory under `%TEMP%`, refused to run if an Aurora
+  process or installation was present, and confirmed the standard profile path
+  is outside the install path. It did not create a disposable Windows account,
+  so preservation of actual profile contents was not exercised. Detailed output
+  is saved in `evidence/installer-smoke.json`.
 - The portable ZIP was inspected: exactly `Aurora.exe`, `LICENSE`, and `README.txt`.
   It contains no profiles, tests, fixture source, or credentials.
 - SHA-256 hashes are in the generated `dist/alpha/SHA256SUMS.txt`.
 
 ## Automated checks on the pushed commit
 
-GitHub Actions run [39948687861](https://github.com/Vegetable1337/aurora-browser/actions/runs/39948687861)
-completed successfully for commit `06ae451`. Both the Rust and legacy Python
-jobs passed, including format, tests, Clippy, UI JavaScript syntax, MV3 probe
-build, Windows build, dependency audit, and Python tests.
+GitHub Actions runs [39948687861](https://github.com/Vegetable1337/aurora-browser/actions/runs/39948687861),
+[39951158572](https://github.com/Vegetable1337/aurora-browser/actions/runs/39951158572),
+and [39954380715](https://github.com/Vegetable1337/aurora-browser/actions/runs/39954380715)
+completed successfully for the three pushed Alpha-preparation commits. Both
+Rust and legacy Python jobs passed, including format, tests, Clippy, UI
+JavaScript syntax, MV3 probe build, Windows build, dependency audit, and Python
+tests.
 
 Local validation also passed `cargo build --release --locked`, the Release
 launch smoke, UI syntax, `cargo audit`, and 19 Python unittests. `cargo audit`
