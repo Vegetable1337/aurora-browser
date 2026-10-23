@@ -32,6 +32,18 @@ The observed UIA tree is saved in `evidence/ui-automation-window.json`. The test
 closed the real window with the UIA Window pattern, waited for exit, and removed
 its disposable profile using bounded retries for delayed WebView2 file release.
 
+## Visible window capture
+
+`packaging/capture-alpha-window.ps1` launches the actual Release executable with
+a disposable profile, waits for the visible Aurora window, captures the desktop
+window, closes it through UI Automation, and removes the disposable data. The
+captured `evidence/main-window.png` shows the rendered Aurora new-tab page.
+The immediate capture can catch the dark WebView background before its first
+compositor frame; a capture after a one-second settling interval showed the
+complete page. This is a short first-paint delay, not a failed navigation. The
+capture verifies rendering only; UIA still cannot operate the HTML controls, so
+it does not replace the manual interaction checklist.
+
 ## Windows Alpha packaging
 
 - Release EXE PE subsystem is `2` (Windows GUI); embedded product/version/icon
@@ -55,8 +67,9 @@ its disposable profile using bounded retries for delayed WebView2 file release.
 
 GitHub Actions runs [39948687861](https://github.com/Vegetable1337/aurora-browser/actions/runs/39948687861),
 [39951158572](https://github.com/Vegetable1337/aurora-browser/actions/runs/39951158572),
-and [39954380715](https://github.com/Vegetable1337/aurora-browser/actions/runs/39954380715)
-completed successfully for the three pushed Alpha-preparation commits. Both
+[39954380715](https://github.com/Vegetable1337/aurora-browser/actions/runs/39954380715),
+and [39957084924](https://github.com/Vegetable1337/aurora-browser/actions/runs/39957084924)
+completed successfully for the pushed Alpha-preparation commits. Both
 Rust and legacy Python jobs passed, including format, tests, Clippy, UI
 JavaScript syntax, MV3 probe build, Windows build, dependency audit, and Python
 tests.
