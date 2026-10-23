@@ -19,6 +19,19 @@ This exercises WebView2 APIs in the native probe. It does not prove that Aurora'
 visual extension manager or browser UI was interacted with. Chrome Web Store and
 Firefox Add-ons distribution are not enabled in this Alpha.
 
+## UI Automation discovery
+
+`packaging/test-ui-automation-smoke.ps1` launched the real Release app with a
+disposable data directory and exposed a visible `Aurora` window to Windows UI
+Automation. The tree contained 38 nodes, but the WebView2 contents appeared as
+opaque panes; the only invokable controls were the native minimize, restore,
+and close buttons. UI Automation did not expose the toolbar, tabs, menus, or page
+controls as actionable elements. This is why the remaining interactions require
+the manual checklist; the earlier coordinate-input problem was not retried.
+The observed UIA tree is saved in `evidence/ui-automation-window.json`. The test
+closed the real window with the UIA Window pattern, waited for exit, and removed
+its disposable profile using bounded retries for delayed WebView2 file release.
+
 ## Windows Alpha packaging
 
 - Release EXE PE subsystem is `2` (Windows GUI); embedded product/version/icon

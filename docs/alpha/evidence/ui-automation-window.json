@@ -1,0 +1,198 @@
+{
+  "ProcessId": 35252,
+  "WindowName": "Aurora",
+  "WindowOffscreen": false,
+  "ControlCount": 38,
+  "Controls": [
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "Новая вкладка — Aurora",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "Новая вкладка — Aurora — веб-содержимое",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "about:blank",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "about:blank — веб-содержимое",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.TitleBar",
+      "Name": "Aurora",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.MenuBar",
+      "Name": "System Menu Bar",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.MenuItem",
+      "Name": "System",
+      "HasInvoke": false
+    },
+    {
+      "Type": "ControlType.Button",
+      "Name": "Minimize",
+      "HasInvoke": true
+    },
+    {
+      "Type": "ControlType.Button",
+      "Name": "Restore",
+      "HasInvoke": true
+    },
+    {
+      "Type": "ControlType.Button",
+      "Name": "Close",
+      "HasInvoke": true
+    }
+  ]
+}
