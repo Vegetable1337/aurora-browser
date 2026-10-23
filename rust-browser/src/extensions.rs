@@ -185,9 +185,10 @@ fn is_reparse_point(_: &fs::Metadata) -> bool {
 mod webview2 {
     use super::{ExtensionInfo, ExtensionManifest, ManagedExtension};
     use std::{
+        cell::RefCell,
         fs,
         path::{Component, Path, PathBuf},
-        sync::{Arc, Mutex},
+        rc::Rc,
     };
     use webview2_com::{
         BrowserExtensionEnableCompletedHandler, BrowserExtensionRemoveCompletedHandler,
@@ -249,11 +250,11 @@ mod webview2 {
                     })
                     .map_err(|error| error.to_string());
                 if result.is_err() {
-                    if let Some(id) = installed_id {
-                        if let Ok(mut records) = read_registry(&registry) {
-                            records.retain(|record| record.id != id);
-                            let _ = write_registry(&registry, &records);
-                        }
+                    if let Some(id) = installed_id
+                        && let Ok(mut records) = read_registry(&registry)
+                    {
+                        records.retain(|record| record.id != id);
+                        let _ = write_registry(&registry, &records);
                     }
                     if let Some(extension) = installed {
                         let cleanup_directory = directory.clone();
@@ -457,17 +458,16 @@ mod webview2 {
         unsafe { profile.GetBrowserExtensions(&handler) }.map_err(|e| e.to_string())
     }
 
-    type SharedDone = Arc<Mutex<Option<Box<dyn FnOnce(Result<(), String>) + 'static>>>>;
+    type SharedDone = Rc<RefCell<Option<Box<dyn FnOnce(Result<(), String>) + 'static>>>>;
 
     fn shared_done(done: impl FnOnce(Result<(), String>) + 'static) -> SharedDone {
-        Arc::new(Mutex::new(Some(Box::new(done))))
+        Rc::new(RefCell::new(Some(Box::new(done))))
     }
 
     fn finish(done: &SharedDone, result: Result<(), String>) {
-        if let Ok(mut slot) = done.lock() {
-            if let Some(done) = slot.take() {
-                done(result);
-            }
+        let callback = done.borrow_mut().take();
+        if let Some(callback) = callback {
+            callback(result);
         }
     }
 

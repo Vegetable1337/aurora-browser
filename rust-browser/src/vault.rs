@@ -159,7 +159,7 @@ impl ProfileVault {
                 found.push((metadata.profile_id, metadata.display_name, directory));
             }
         }
-        found.sort_by(|left, right| left.1.to_lowercase().cmp(&right.1.to_lowercase()));
+        found.sort_by_key(|left| left.1.to_lowercase());
         found
     }
 
@@ -454,7 +454,7 @@ impl ProfileVault {
         let master_key = self.key()?;
         let mut metadata = read_metadata(&self.directory)?;
         let aad = format!("Aurora/{}/pmk/v1", self.profile_id);
-        metadata.key_wraps.password = wrap_password(password, &master_key, aad.as_bytes())?;
+        metadata.key_wraps.password = wrap_password(password, master_key, aad.as_bytes())?;
         write_metadata(&self.directory, &metadata)
     }
 
@@ -646,143 +646,6 @@ impl ProfileVault {
 impl Drop for ProfileVault {
     fn drop(&mut self) {
         self.lock();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    struct Fixture(PathBuf);
-    impl Fixture {
-        fn new() -> Self {
-            Self(std::env::temp_dir().join(format!("aurora-test-{}", uuid::Uuid::new_v4())))
-        }
-        fn create(&self) -> CreatedVault {
-            ProfileVault::create(&self.0, "Test", "test password alpha").unwrap()
-        }
-    }
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-    #[test]
-    fn missing_nonce_state_fails_closed() {
-        let root = Fixture::new();
-        let created = root.create();
-        let vault = created.vault;
-        vault.put("settings", "secret", b"private value").unwrap();
-        vault.delete("settings", "secret").unwrap();
-        let db = Connection::open(vault.directory().join("records.sqlite3")).unwrap();
-        db.execute("DELETE FROM store_meta WHERE key='next_nonce_counter'", [])
-            .unwrap();
-        assert!(vault.put("settings", "secret", b"changed value").is_err());
-    }
-    #[test]
-    fn independent_keys_lock_and_authenticated_records() {
-        let root = Fixture::new();
-        let mut first = root.create().vault;
-        let second = root.create().vault;
-        assert_ne!(first.key().unwrap(), second.key().unwrap());
-        first.put("settings", "secret", b"private value").unwrap();
-        assert_eq!(
-            first.get("settings", "secret").unwrap().unwrap(),
-            b"private value"
-        );
-        assert!(second.get("settings", "secret").unwrap().is_none());
-        let db = Connection::open(first.directory().join("records.sqlite3")).unwrap();
-        let (nonce, ciphertext): (Vec<u8>, Vec<u8>) = db
-            .query_row(
-                "SELECT nonce,ciphertext FROM encrypted_records WHERE record_id='secret'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        let other_db = Connection::open(second.directory().join("records.sqlite3")).unwrap();
-        other_db
-            .execute(
-                "INSERT INTO encrypted_records VALUES('settings','secret',?,?)",
-                params![nonce, ciphertext],
-            )
-            .unwrap();
-        assert!(second.get("settings", "secret").is_err());
-        db.execute("UPDATE encrypted_records SET ciphertext=zeroblob(32)", [])
-            .unwrap();
-        assert!(first.get("settings", "secret").is_err());
-        first.lock();
-        assert!(first.put("settings", "secret", b"x").is_err());
-        assert!(first.get("settings", "secret").is_err());
-        second.put("settings", "still-open", b"yes").unwrap();
-    }
-    #[test]
-    fn nonce_progress_survives_reopen_and_deleted_database_is_not_recreated() {
-        let root = Fixture::new();
-        let mut vault = root.create().vault;
-        vault.put("settings", "one", b"first").unwrap();
-        let directory = vault.directory().to_owned();
-        let path = directory.join("records.sqlite3");
-        let nonce_before: Vec<u8> = Connection::open(&path)
-            .unwrap()
-            .query_row("SELECT nonce FROM encrypted_records", [], |row| row.get(0))
-            .unwrap();
-        vault.lock();
-        let reopened = ProfileVault::unlock_password(&directory, "test password alpha").unwrap();
-        reopened.put("settings", "one", b"second").unwrap();
-        let nonce_after: Vec<u8> = Connection::open(&path)
-            .unwrap()
-            .query_row("SELECT nonce FROM encrypted_records", [], |row| row.get(0))
-            .unwrap();
-        assert_ne!(nonce_before, nonce_after);
-        fs::remove_file(&path).unwrap();
-        assert!(reopened.put("settings", "one", b"third").is_err());
-        assert!(!path.exists());
-    }
-    #[test]
-    fn recovery_and_backup_round_trip() {
-        let root = Fixture::new();
-        let created = root.create();
-        let mut vault = created.vault;
-        vault
-            .put("bookmarks", "one", b"https://example.invalid")
-            .unwrap();
-        let directory = vault.directory().to_owned();
-        let backup = root.0.join("backup.aurorabk");
-        vault
-            .export_backup(&backup, "backup password alpha")
-            .unwrap();
-        vault.lock();
-        assert!(ProfileVault::unlock_password(&directory, "wrong password").is_err());
-        let recovered = ProfileVault::unlock_recovery(&directory, &created.recovery_key).unwrap();
-        assert_eq!(
-            recovered.get("bookmarks", "one").unwrap().unwrap(),
-            b"https://example.invalid"
-        );
-        let destination = root.0.join("restored");
-        let restored = ProfileVault::restore_backup(
-            &backup,
-            &destination,
-            "backup password alpha",
-            "test password alpha",
-        )
-        .unwrap();
-        assert_eq!(
-            restored.get("bookmarks", "one").unwrap().unwrap(),
-            b"https://example.invalid"
-        );
-        restored.put("bookmarks", "two", b"new record").unwrap();
-        let mut bytes = fs::read(&backup).unwrap();
-        let last = bytes.len() - 1;
-        bytes[last] ^= 1;
-        fs::write(&backup, bytes).unwrap();
-        assert!(
-            ProfileVault::restore_backup(
-                &backup,
-                &root.0.join("tampered"),
-                "backup password alpha",
-                "test password alpha"
-            )
-            .is_err()
-        );
     }
 }
 
@@ -1120,4 +983,141 @@ fn dpapi_unprotect(data: &[u8], entropy: &[u8]) -> Result<Vec<u8>, VaultError> {
         let _ = LocalFree(Some(HLOCAL(output.pbData as *mut _)));
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            Self(std::env::temp_dir().join(format!("aurora-test-{}", uuid::Uuid::new_v4())))
+        }
+        fn create(&self) -> CreatedVault {
+            ProfileVault::create(&self.0, "Test", "test password alpha").unwrap()
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    #[test]
+    fn missing_nonce_state_fails_closed() {
+        let root = Fixture::new();
+        let created = root.create();
+        let vault = created.vault;
+        vault.put("settings", "secret", b"private value").unwrap();
+        vault.delete("settings", "secret").unwrap();
+        let db = Connection::open(vault.directory().join("records.sqlite3")).unwrap();
+        db.execute("DELETE FROM store_meta WHERE key='next_nonce_counter'", [])
+            .unwrap();
+        assert!(vault.put("settings", "secret", b"changed value").is_err());
+    }
+    #[test]
+    fn independent_keys_lock_and_authenticated_records() {
+        let root = Fixture::new();
+        let mut first = root.create().vault;
+        let second = root.create().vault;
+        assert_ne!(first.key().unwrap(), second.key().unwrap());
+        first.put("settings", "secret", b"private value").unwrap();
+        assert_eq!(
+            first.get("settings", "secret").unwrap().unwrap(),
+            b"private value"
+        );
+        assert!(second.get("settings", "secret").unwrap().is_none());
+        let db = Connection::open(first.directory().join("records.sqlite3")).unwrap();
+        let (nonce, ciphertext): (Vec<u8>, Vec<u8>) = db
+            .query_row(
+                "SELECT nonce,ciphertext FROM encrypted_records WHERE record_id='secret'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let other_db = Connection::open(second.directory().join("records.sqlite3")).unwrap();
+        other_db
+            .execute(
+                "INSERT INTO encrypted_records VALUES('settings','secret',?,?)",
+                params![nonce, ciphertext],
+            )
+            .unwrap();
+        assert!(second.get("settings", "secret").is_err());
+        db.execute("UPDATE encrypted_records SET ciphertext=zeroblob(32)", [])
+            .unwrap();
+        assert!(first.get("settings", "secret").is_err());
+        first.lock();
+        assert!(first.put("settings", "secret", b"x").is_err());
+        assert!(first.get("settings", "secret").is_err());
+        second.put("settings", "still-open", b"yes").unwrap();
+    }
+    #[test]
+    fn nonce_progress_survives_reopen_and_deleted_database_is_not_recreated() {
+        let root = Fixture::new();
+        let mut vault = root.create().vault;
+        vault.put("settings", "one", b"first").unwrap();
+        let directory = vault.directory().to_owned();
+        let path = directory.join("records.sqlite3");
+        let nonce_before: Vec<u8> = Connection::open(&path)
+            .unwrap()
+            .query_row("SELECT nonce FROM encrypted_records", [], |row| row.get(0))
+            .unwrap();
+        vault.lock();
+        let reopened = ProfileVault::unlock_password(&directory, "test password alpha").unwrap();
+        reopened.put("settings", "one", b"second").unwrap();
+        let nonce_after: Vec<u8> = Connection::open(&path)
+            .unwrap()
+            .query_row("SELECT nonce FROM encrypted_records", [], |row| row.get(0))
+            .unwrap();
+        assert_ne!(nonce_before, nonce_after);
+        fs::remove_file(&path).unwrap();
+        assert!(reopened.put("settings", "one", b"third").is_err());
+        assert!(!path.exists());
+    }
+    #[test]
+    fn recovery_and_backup_round_trip() {
+        let root = Fixture::new();
+        let created = root.create();
+        let mut vault = created.vault;
+        vault
+            .put("bookmarks", "one", b"https://example.invalid")
+            .unwrap();
+        let directory = vault.directory().to_owned();
+        let backup = root.0.join("backup.aurorabk");
+        vault
+            .export_backup(&backup, "backup password alpha")
+            .unwrap();
+        vault.lock();
+        assert!(ProfileVault::unlock_password(&directory, "wrong password").is_err());
+        let recovered = ProfileVault::unlock_recovery(&directory, &created.recovery_key).unwrap();
+        assert_eq!(
+            recovered.get("bookmarks", "one").unwrap().unwrap(),
+            b"https://example.invalid"
+        );
+        let destination = root.0.join("restored");
+        let restored = ProfileVault::restore_backup(
+            &backup,
+            &destination,
+            "backup password alpha",
+            "test password alpha",
+        )
+        .unwrap();
+        assert_eq!(
+            restored.get("bookmarks", "one").unwrap().unwrap(),
+            b"https://example.invalid"
+        );
+        restored.put("bookmarks", "two", b"new record").unwrap();
+        let mut bytes = fs::read(&backup).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 1;
+        fs::write(&backup, bytes).unwrap();
+        assert!(
+            ProfileVault::restore_backup(
+                &backup,
+                &root.0.join("tampered"),
+                "backup password alpha",
+                "test password alpha"
+            )
+            .is_err()
+        );
+    }
 }
