@@ -9,10 +9,12 @@ $alphaDir = Join-Path $repoRoot 'dist\alpha'
 $installerScript = Join-Path $PSScriptRoot 'aurora.iss'
 $readme = Join-Path $repoRoot 'docs\alpha\README.txt'
 $license = Join-Path $repoRoot 'LICENSE'
+$thirdPartyNotices = Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md'
+$mplLicense = Join-Path $repoRoot 'third_party\licenses\MPL-2.0.txt'
 $zipPath = Join-Path $alphaDir 'Aurora-0.1.0-alpha-Windows-x64-Portable.zip'
 $hashPath = Join-Path $alphaDir 'SHA256SUMS.txt'
 
-foreach ($required in @($releaseExe, $installerScript, $readme, $license, $IsccPath)) {
+foreach ($required in @($releaseExe, $installerScript, $readme, $license, $thirdPartyNotices, $mplLicense, $IsccPath)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Required packaging input is missing: $required"
     }
@@ -32,6 +34,10 @@ try {
     Copy-Item -LiteralPath $releaseExe -Destination (Join-Path $stage 'Aurora.exe')
     Copy-Item -LiteralPath $readme -Destination (Join-Path $stage 'README.txt')
     Copy-Item -LiteralPath $license -Destination (Join-Path $stage 'LICENSE')
+    Copy-Item -LiteralPath $thirdPartyNotices -Destination (Join-Path $stage 'THIRD_PARTY_NOTICES.md')
+    $licenseStageDir = Join-Path $stage 'third_party\licenses'
+    New-Item -ItemType Directory -Path $licenseStageDir -Force | Out-Null
+    Copy-Item -LiteralPath $mplLicense -Destination (Join-Path $licenseStageDir 'MPL-2.0.txt')
 
     $version = (Get-Item -LiteralPath (Join-Path $stage 'Aurora.exe')).VersionInfo
     if ($version.ProductName -ne 'Aurora Browser' -or
@@ -45,7 +51,7 @@ try {
     $portable = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
     try {
         $entries = @($portable.Entries | ForEach-Object FullName | Sort-Object)
-        if (($entries -join '|') -ne 'Aurora.exe|LICENSE|README.txt') {
+        if (($entries -join '|') -ne 'Aurora.exe|LICENSE|README.txt|THIRD_PARTY_NOTICES.md|third_party/licenses/MPL-2.0.txt') {
             throw "Unexpected portable ZIP contents: $($entries -join ', ')"
         }
     }
