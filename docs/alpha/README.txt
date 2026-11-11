@@ -57,5 +57,9 @@ https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution
 
 Manual GUI regression checklist: docs/alpha/manual-checklist.md
 Known limitations and test evidence: docs/p0-audit.md
-Source code and third-party notices are available in the project repository:
+The installer and portable ZIP contain LICENSE, THIRD_PARTY_NOTICES.md and
+third_party/licenses/MPL-2.0.txt. These are initial notices, not a complete
+transitive-dependency notice bundle. Review every shipped dependency license
+before redistribution.
+Source code and the full third-party inventory are in the repository:
 https://github.com/Vegetable1337/aurora-browser

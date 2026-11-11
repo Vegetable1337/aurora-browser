@@ -42,6 +42,11 @@ try {
     $uninstaller = Join-Path $installDir 'unins000.exe'
     if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Installed Aurora.exe was not found.' }
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'Installed uninstaller was not found.' }
+    foreach ($notice in @('LICENSE', 'THIRD_PARTY_NOTICES.md', 'third_party\licenses\MPL-2.0.txt')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $installDir $notice) -PathType Leaf)) {
+            throw "Installed third-party license notice missing: $notice"
+        }
+    }
     if (-not (Test-Path -LiteralPath $existingKey)) { throw 'Windows uninstall registration was not created.' }
     if ($null -eq (Find-StartMenuShortcut)) { throw 'Start menu shortcut was not created.' }
 

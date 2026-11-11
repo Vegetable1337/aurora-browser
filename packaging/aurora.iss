@@ -47,6 +47,8 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 [Files]
 Source: "{#ReleaseDir}{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#RepoRoot}LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#RepoRoot}THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#RepoRoot}third_party\licenses\MPL-2.0.txt"; DestDir: "{app}\third_party\licenses"; Flags: ignoreversion
 Source: "{#RepoRoot}docs\alpha\README.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
