@@ -1,6 +1,6 @@
 # Third-party browser sources
 
-Aurora uses upstream projects as dependencies or engineering references. It does not copy another browser's full application source. This inventory names direct dependencies and major engine/runtime components; transitive packages are recorded in `requirements.txt` and `rust-browser/Cargo.lock` and may have additional notices.
+Aurora uses upstream projects as dependencies or engineering references. It does not copy another browser's full application source. This inventory names direct dependencies and major engine/runtime components; direct packages are declared in `requirements.txt` and `rust-browser/Cargo.toml`, while exact resolved Rust packages are recorded in `rust-browser/Cargo.lock` and may have additional notices. See [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) for the distributable acknowledgements and [`third_party/licenses/MPL-2.0.txt`](../third_party/licenses/MPL-2.0.txt) for the upstream Brave license text.
 
 ## Python application
 
@@ -17,7 +17,7 @@ Aurora uses upstream projects as dependencies or engineering references. It does
 - Python bindings: <https://github.com/ArniDagur/python-adblock>, pinned in `requirements.txt` as `adblock==0.6.0`; used by `app/privacy.py`.
 - The adblock-rust upstream is MPL-2.0; Python bindings are MIT OR Apache-2.0. Review all direct and transitive license obligations before distributing a built application.
 
-No upstream implementation source files are copied into Aurora.
+Aurora uses these components as packages; this inventory does not identify any verbatim upstream implementation files copied into Aurora.
 
 ## qutebrowser
 
@@ -48,4 +48,4 @@ No upstream implementation source files are copied into Aurora.
 
 ## Distribution notes
 
-When distributing Aurora, include the license and notice files required by Qt/PySide6, Chromium/Qt WebEngine, Brave adblock-rust, Python bindings, and all transitive dependencies. This source inventory is not a complete generated bill of materials; produce and review one before distributing executable builds. The Aurora source files are offered under the MIT license in `LICENSE`; that license does not replace third-party licenses.
+When distributing Aurora, include the license and notice files required by Qt/PySide6, Chromium/Qt WebEngine, Brave adblock-rust, Python bindings, and all transitive dependencies. The Windows Rust installer and portable ZIP now carry `THIRD_PARTY_NOTICES.md` and Brave's MPL-2.0 text, but the transitive dependency notice review remains outstanding. This source inventory is not a complete generated bill of materials; produce and review one before distributing executable builds. The Aurora source files are offered under the MIT license in `LICENSE`; that license does not replace third-party licenses.
